@@ -1,0 +1,9 @@
+.DS_Store
+.idea/
+.claude/
+
+# ASML-confidential project docs — keep local only
+API_SPEC.md
+CLAUDE.md
+DATA_SCHEMA.md
+*.xlsx
