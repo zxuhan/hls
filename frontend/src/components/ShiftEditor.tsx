@@ -63,7 +63,7 @@ export function ShiftEditor({ days, onChange }: Props) {
   const addShift = (dayIdx: number) => {
     const next = days.map((d, i) =>
       i === dayIdx
-        ? { shifts: [...d.shifts, { startHour: 1, durationHours: 8, fte: 3 }] }
+        ? { shifts: [...d.shifts, { startHour: 1, durationHours: 14, fte: 6 }] }
         : d,
     )
     onChange(next)
@@ -84,7 +84,7 @@ export function ShiftEditor({ days, onChange }: Props) {
   }
 
   const addDay = () => {
-    onChange([...days, { shifts: [{ startHour: 1, durationHours: 8, fte: 3 }] }])
+    onChange([...days, { shifts: [{ startHour: 1, durationHours: 14, fte: 6 }] }])
   }
 
   return (

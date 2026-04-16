@@ -45,7 +45,7 @@ const ALGORITHMS: { id: AlgorithmId; label: string }[] = [
 const C_WEIGHTS: CandidateCWeight[] = [0, 0.25, 0.5, 0.75, 1]
 
 const INITIAL_DAYS: ShiftDay[] = [
-  { shifts: [{ startHour: 1, durationHours: 8, fte: 3 }] },
+  { shifts: [{ startHour: 1, durationHours: 14, fte: 6 }] },
 ]
 
 export default function App() {
