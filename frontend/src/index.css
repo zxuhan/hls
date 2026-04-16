@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 215 25% 15%;
+
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 199 89% 95%;
+    --accent-foreground: 199 89% 30%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 199 89% 48%;
+
+    --radius: 0.75rem;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 20%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Excel-like sheet metrics */
+    --cell-w: 22px;
+    --lane-h: 28px;
+    --gutter-w: 44px;
+    --col-header-h: 22px;
+    --hour-header-h: 24px;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto,
+      Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* ─── Excel-style sheet (Result Grid) ──────────────────────────────────── */
+
+.day-block {
+  margin-bottom: 22px;
+}
+.day-block:last-child {
+  margin-bottom: 0;
+}
+
+.day-header {
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  margin-bottom: 6px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.day-header::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 14px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+}
+
+.sheet-scroll {
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 4px);
+  background: hsl(var(--card));
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.sheet {
+  display: grid;
+  position: relative;
+  background: hsl(var(--card));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-corner {
+  background: hsl(var(--accent));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+.sheet-corner.row-1 {
+  top: 0;
+}
+.sheet-corner.row-2 {
+  top: var(--col-header-h);
+}
+
+.sheet-col-header {
+  height: var(--col-header-h);
+  background: hsl(var(--accent));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.sheet-hour-header {
+  height: var(--hour-header-h);
+  background: hsl(var(--secondary));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  position: sticky;
+  top: var(--col-header-h);
+  z-index: 2;
+}
+
+.sheet-row-header {
+  width: var(--gutter-w);
+  background: hsl(var(--accent));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  height: var(--lane-h);
+}
+
+.sheet-row-bg {
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+}
+.sheet-row-bg.odd {
+  background: hsl(var(--secondary));
+}
+
+.sheet-block {
+  background-color: color-mix(in srgb, var(--cell-bg, hsl(199 89% 70%)) 22%, white);
+  color: hsl(var(--foreground));
+  border: 1px solid color-mix(in srgb, var(--cell-bg, hsl(199 89% 48%)) 55%, white);
+  border-radius: calc(var(--radius) - 4px);
+  margin: 1px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: default;
+  z-index: 1;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+.sheet-block:hover {
+  box-shadow: 0 0 0 2px hsl(var(--primary)), 0 4px 16px rgba(11, 31, 74, 0.08);
+  z-index: 5;
+}
+
+.sheet-block-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: hsl(199 89% 30%);
+  flex-shrink: 0;
+}
+
+.sheet-block-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

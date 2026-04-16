@@ -1,10 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast, Toaster } from 'sonner'
 import { getBlocks, postSchedule, reloadBlocks } from './api'
 import { BlockList } from './components/BlockList'
 import { ResultGrid } from './components/ResultGrid'
 import { ShiftEditor, validateShiftSchedule } from './components/ShiftEditor'
 import { ViolationModal } from './components/ViolationModal'
 import { exportSchedule } from './exportXlsx'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import {
+  Play,
+  RotateCcw,
+  FileSpreadsheet,
+  AlertTriangle,
+  Download,
+  BarChart3,
+} from 'lucide-react'
 import type {
   AlgorithmId,
   BlockDto,
@@ -17,10 +36,10 @@ import type {
 } from './types'
 
 const ALGORITHMS: { id: AlgorithmId; label: string }[] = [
-  { id: 'A_MTS', label: 'A · Greedy (Most Total Successors)' },
-  { id: 'A_SPT', label: 'A · Greedy (Shortest Processing Time)' },
-  { id: 'B_CPSAT', label: 'B · CP-SAT exact solver' },
-  { id: 'C_ENHANCED', label: 'C · Domain-enhanced greedy' },
+  { id: 'A_MTS', label: 'A · Greedy (MTS)' },
+  { id: 'A_SPT', label: 'A · Greedy (SPT)' },
+  { id: 'B_CPSAT', label: 'B · CP-SAT' },
+  { id: 'C_ENHANCED', label: 'C · Enhanced' },
 ]
 
 const C_WEIGHTS: CandidateCWeight[] = [0, 0.25, 0.5, 0.75, 1]
@@ -41,7 +60,6 @@ export default function App() {
   const [result, setResult] = useState<ScheduleResponse | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [violations, setViolations] = useState<LoaderViolation[] | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
   const [fileLabel, setFileLabel] = useState('blocks.xlsx')
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
@@ -62,18 +80,18 @@ export default function App() {
     }
   }, [])
 
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toast) return
-    const t = window.setTimeout(() => setToast(null), 3000)
-    return () => window.clearTimeout(t)
-  }, [toast])
-
   const shiftErrors = useMemo(() => validateShiftSchedule(days), [days])
 
   const noBlocksSelected = selectedIds.size === 0
   const canSchedule = !loading && !noBlocksSelected && shiftErrors.length === 0
   const showNotice = shiftErrors.length > 0 || noBlocksSelected
+
+  const warnings = useMemo(() => {
+    const w: string[] = []
+    if (noBlocksSelected) w.push('Select at least one block to schedule.')
+    w.push(...shiftErrors)
+    return w
+  }, [noBlocksSelected, shiftErrors])
 
   const handleReload = async () => {
     try {
@@ -83,13 +101,13 @@ export default function App() {
         const blocksRes = await getBlocks()
         if (blocksRes.success) setBlocks(blocksRes.blocks)
         setSelectedIds(new Set())
-        setToast('Block list changed — selections cleared')
+        toast.success('File reloaded successfully.')
         setFileLabel(extractFilename(body.message) ?? fileLabel)
       } else {
         setViolations(body.violations ?? [])
       }
     } catch (err) {
-      setToast(`Reload error: ${String(err)}`)
+      toast.error(`Reload error: ${String(err)}`)
     } finally {
       setLoading(false)
     }
@@ -108,7 +126,11 @@ export default function App() {
       setLoading(true)
       const { status, body } = await postSchedule(req)
       if (status === 200 && (body as ScheduleResponse).success) {
-        setResult(body as ScheduleResponse)
+        const res = body as ScheduleResponse
+        setResult(res)
+        toast.success(
+          `Schedule complete — ${res.makespan} day${res.makespan !== 1 ? 's' : ''} makespan in ${res.runtimeMs}ms`,
+        )
       } else if (status === 422) {
         setScheduleError(
           (body as ErrorResponse).errorMessage ?? 'Schedule failed (422)',
@@ -125,158 +147,200 @@ export default function App() {
   }
 
   const handleExport = () => {
-    if (result) exportSchedule(result, algorithm)
+    if (result) {
+      exportSchedule(result, algorithm)
+      toast.success('Export started — .xlsx file will download shortly.')
+    }
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="app-header-left">
-          <img src="/asml-logo.svg" alt="ASML" className="brand-logo" />
-          <h1 className="app-title">HLS Scheduler</h1>
-        </div>
+    <TooltipProvider>
+      <div className="min-h-screen bg-background">
+        <Toaster position="bottom-right" richColors />
 
-        <div className="app-header-center">
-          <label className="toolbar-field">
-            <span>Algorithm</span>
-            <select
-              value={algorithm}
-              onChange={(e) => setAlgorithm(e.target.value as AlgorithmId)}
-            >
-              {ALGORITHMS.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* Header */}
+        <header className="sticky top-0 z-50 border-b bg-card shadow-sm">
+          <div className="flex items-center justify-between gap-4 px-6 py-3">
+            {/* Left: Logo */}
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xl font-bold tracking-wider text-primary">ASML</span>
+              <span className="text-lg font-semibold text-foreground">HLS Scheduler</span>
+            </div>
 
-          {algorithm === 'B_CPSAT' && (
-            <label className="toolbar-field">
-              <span>Time limit (s)</span>
-              <input
-                type="number"
-                min={1}
-                value={cpSatTimeLimitSeconds}
-                onChange={(e) =>
-                  setCpSatTimeLimitSeconds(
-                    Math.max(1, parseInt(e.target.value, 10) || 1),
-                  )
-                }
-              />
-            </label>
-          )}
-
-          {algorithm === 'C_ENHANCED' && (
-            <label className="toolbar-field">
-              <span>Weight (w)</span>
-              <select
-                value={candidateCWeight}
-                onChange={(e) =>
-                  setCandidateCWeight(
-                    parseFloat(e.target.value) as CandidateCWeight,
-                  )
-                }
+            {/* Center: Controls */}
+            <div className="flex items-center gap-3 flex-wrap justify-center">
+              <Select
+                value={algorithm}
+                onValueChange={(v) => setAlgorithm(v as AlgorithmId)}
               >
-                {C_WEIGHTS.map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+                <SelectTrigger className="w-[180px] bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALGORITHMS.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handleSchedule}
-            disabled={!canSchedule}
-          >
-            {loading ? 'Scheduling…' : 'Schedule'}
-          </button>
-        </div>
+              {algorithm === 'B_CPSAT' && (
+                <div className="flex items-center gap-1.5">
+                  <label className="text-sm text-muted-foreground whitespace-nowrap">
+                    Time limit
+                  </label>
+                  <Input
+                    type="number"
+                    value={cpSatTimeLimitSeconds}
+                    onChange={(e) =>
+                      setCpSatTimeLimitSeconds(
+                        Math.max(1, parseInt(e.target.value, 10) || 1),
+                      )
+                    }
+                    className="w-20 bg-card"
+                    min={1}
+                  />
+                  <span className="text-xs text-muted-foreground">s</span>
+                </div>
+              )}
 
-        <div className="app-header-right">
-          <span className="file-label">
-            {fileLabel} · {blocks.length} blocks
-          </span>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={handleReload}
-            disabled={loading}
-          >
-            Reload
-          </button>
-        </div>
-      </header>
+              {algorithm === 'C_ENHANCED' && (
+                <div className="flex items-center gap-1.5">
+                  <label className="text-sm text-muted-foreground whitespace-nowrap">
+                    Weight (w)
+                  </label>
+                  <Select
+                    value={String(candidateCWeight)}
+                    onValueChange={(v) =>
+                      setCandidateCWeight(parseFloat(v) as CandidateCWeight)
+                    }
+                  >
+                    <SelectTrigger className="w-[80px] bg-card">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {C_WEIGHTS.map((w) => (
+                        <SelectItem key={w} value={String(w)}>
+                          {w}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-      {showNotice && (
-        <div className="toolbar-notice">
-          {shiftErrors.map((e, i) => (
-            <div key={i}>{e}</div>
-          ))}
-          {noBlocksSelected && <div>Select at least one block to schedule.</div>}
-        </div>
-      )}
+              <Button onClick={handleSchedule} disabled={!canSchedule} className="gap-2">
+                <Play className="h-4 w-4" />
+                {loading ? 'Scheduling...' : 'Schedule'}
+              </Button>
+            </div>
 
-      {bootstrapError && (
-        <div className="bootstrap-error">
-          Failed to reach backend: {bootstrapError}
-        </div>
-      )}
+            {/* Right: File info */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-2 rounded-md bg-secondary px-3 py-1.5">
+                <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">{fileLabel}</span>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  {blocks.length} blocks
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReload}
+                disabled={loading}
+                className="gap-1.5"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reload
+              </Button>
+            </div>
+          </div>
+        </header>
 
-      <main className="app-main">
-        <section className="two-col">
+        {/* Warning banner */}
+        {showNotice && (
+          <div className="mx-6 mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2.5">
+            <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+            <div className="text-sm text-warning-foreground">
+              {warnings.map((w, i) => (
+                <p key={i}>{w}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Bootstrap error */}
+        {bootstrapError && (
+          <div className="mx-6 mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            Failed to reach backend: {bootstrapError}
+          </div>
+        )}
+
+        {/* Two-column workspace */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-6">
           <BlockList
             blocks={blocks}
             selectedIds={selectedIds}
             onChange={setSelectedIds}
           />
           <ShiftEditor days={days} onChange={setDays} />
-        </section>
+        </div>
 
-        <section className="panel result-panel">
-          <div className="panel-header">
-            <span>Result</span>
-            <button
-              type="button"
-              className="btn-secondary btn-sm"
-              onClick={handleExport}
-              disabled={!result}
-            >
-              Export .xlsx
-            </button>
-          </div>
-          <div className="result-body">
+        {/* Results */}
+        <div className="px-6 pb-6">
+          <div className="rounded-lg border bg-card shadow-sm">
+            {/* Result header */}
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="text-sm font-semibold text-foreground">Result</h2>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={!result}
+                onClick={handleExport}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export .xlsx
+              </Button>
+            </div>
+
+            {/* Result body */}
             {scheduleError && (
-              <div className="schedule-error">{scheduleError}</div>
+              <div className="mx-4 mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive">
+                {scheduleError}
+              </div>
             )}
+
             {result ? (
-              <ResultGrid result={result} />
+              <div className="p-4">
+                <ResultGrid result={result} />
+              </div>
             ) : (
-              <div className="empty">
-                No schedule yet. Pick blocks, define shifts, and click Schedule.
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <BarChart3 className="h-10 w-10 mb-3 opacity-30" />
+                <p className="text-sm">No schedule generated yet.</p>
+                <p className="text-xs mt-1">
+                  Select blocks and configure shifts, then click Schedule.
+                </p>
               </div>
             )}
           </div>
-        </section>
-      </main>
+        </div>
 
-      {violations && (
-        <ViolationModal
-          violations={violations}
-          onClose={() => setViolations(null)}
-        />
-      )}
-
-      {toast && <div className="toast">{toast}</div>}
-    </div>
+        {/* Violation modal */}
+        {violations && (
+          <ViolationModal
+            violations={violations}
+            onClose={() => setViolations(null)}
+          />
+        )}
+      </div>
+    </TooltipProvider>
   )
 }
 
-// Best-effort extract of "<N> blocks from <path>" → "<path>" tail.
 function extractFilename(message: string): string | null {
   const m = message.match(/from\s+(.+)$/)
   return m ? m[1].trim() : null

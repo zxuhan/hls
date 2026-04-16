@@ -19,31 +19,29 @@ export function ResultGrid({ result }: Props) {
   }
 
   return (
-    <div className="result-grid">
-      <div className="result-status">
-        <span>
-          <strong>makespan:</strong> {result.makespan} day
-          {result.makespan === 1 ? '' : 's'}
-        </span>
-        <span className="dot">·</span>
-        <span>
-          <strong>runtime:</strong> {result.runtimeMs}ms
-        </span>
+    <div className="space-y-4">
+      {/* Metrics bar */}
+      <div className="flex items-center gap-4 rounded-lg bg-success/10 border border-success/20 px-4 py-2.5">
+        <Metric
+          label="Makespan"
+          value={`${result.makespan} day${result.makespan === 1 ? '' : 's'}`}
+        />
+        <Separator />
+        <Metric label="Runtime" value={`${result.runtimeMs} ms`} />
         {result.bestBound != null && (
           <>
-            <span className="dot">·</span>
-            <span>
-              <strong>gap:</strong>{' '}
-              {((result.optimalityGap ?? 0) * 100).toFixed(1)}%
-            </span>
-            <span className="dot">·</span>
-            <span>
-              <strong>bestBound:</strong> {result.bestBound}
-            </span>
+            <Separator />
+            <Metric
+              label="Gap"
+              value={`${((result.optimalityGap ?? 0) * 100).toFixed(1)}%`}
+            />
+            <Separator />
+            <Metric label="Best bound" value={String(result.bestBound)} />
           </>
         )}
       </div>
 
+      {/* Day grids */}
       {result.daySummaries.map((day) => (
         <DayBlock
           key={day.dayIndex}
@@ -53,6 +51,19 @@ export function ResultGrid({ result }: Props) {
       ))}
     </div>
   )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-semibold text-foreground">{value}</p>
+    </div>
+  )
+}
+
+function Separator() {
+  return <div className="w-px h-8 bg-border" />
 }
 
 function DayBlock({
@@ -65,8 +76,6 @@ function DayBlock({
   const totalCols = day.totalHalfHours
   const hours = Math.ceil(totalCols / 2)
 
-  // Grid columns: gutter + N half-hour columns.
-  // Grid rows: column letters (row 1) + hour labels (row 2) + K lane rows.
   const gridStyle: CSSProperties = {
     gridTemplateColumns: `var(--gutter-w) repeat(${totalCols}, var(--cell-w))`,
     gridTemplateRows: `var(--col-header-h) var(--hour-header-h) repeat(${day.laneCount}, var(--lane-h))`,
@@ -78,13 +87,13 @@ function DayBlock({
 
       <div className="sheet-scroll">
         <div className="sheet" style={gridStyle}>
-          {/* Top-left corner — covers gutter × column-letter row */}
+          {/* Top-left corner */}
           <div
             className="sheet-corner row-1"
             style={{ gridRow: 1, gridColumn: 1 }}
           />
 
-          {/* Row 1: column letters A, B, C, ... AA, AB, ... */}
+          {/* Column letters */}
           {Array.from({ length: totalCols }, (_, i) => (
             <div
               key={`col-${i}`}
@@ -95,7 +104,7 @@ function DayBlock({
             </div>
           ))}
 
-          {/* Top-left corner — gutter × hour-label row */}
+          {/* Hour corner */}
           <div
             className="sheet-corner row-2"
             style={{ gridRow: 2, gridColumn: 1 }}
@@ -103,7 +112,7 @@ function DayBlock({
             #
           </div>
 
-          {/* Row 2: hour labels — each spans 2 half-hour columns */}
+          {/* Hour labels */}
           {Array.from({ length: hours }, (_, h) => {
             const span = Math.min(2, totalCols - h * 2)
             return (
@@ -120,7 +129,7 @@ function DayBlock({
             )
           })}
 
-          {/* Lane row gutters (sticky left) — render row numbers 1..laneCount */}
+          {/* Lane row gutters */}
           {Array.from({ length: day.laneCount }, (_, lane) => (
             <div
               key={`row-${lane}`}
@@ -131,7 +140,7 @@ function DayBlock({
             </div>
           ))}
 
-          {/* Lane row backgrounds (alternating stripes) — span all half-hour columns */}
+          {/* Lane row backgrounds */}
           {Array.from({ length: day.laneCount }, (_, lane) => (
             <div
               key={`bg-${lane}`}
@@ -176,7 +185,6 @@ function DayBlock({
   )
 }
 
-// 0 → "A", 25 → "Z", 26 → "AA", 27 → "AB", … (Excel column letters)
 function indexToColumnLetter(i: number): string {
   let n = i
   let s = ''
