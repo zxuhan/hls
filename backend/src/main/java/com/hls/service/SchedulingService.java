@@ -243,18 +243,24 @@ public class SchedulingService {
     }
 
     /**
-     * Greedy first-fit lane packing with contiguous lanes.
+     * Greedy lane packing. Tries contiguous {@code [laneStart..laneEnd]}
+     * first (ideal for the rendering grid); if first-fit can't find a
+     * contiguous range, falls back to any {@code fte} free lanes — the block
+     * still uses exactly {@code fte} lanes, but those lanes may be
+     * non-adjacent. {@code laneStart}/{@code laneEnd} then hold the min/max
+     * of the assigned lanes, with possible gaps inside the range.
      *
-     * <p>Sorts the day's blocks by {@code (startHalfHour ASC, fteRequirement DESC, blockId ASC)}
-     * and assigns each one to the smallest lane index {@code i} such that
-     * lanes {@code [i, i + fte - 1]} are all free at the block's start. This
-     * is provably correct as long as the underlying scheduler respects the
-     * FTE-capacity constraint at every half-hour, which all three algorithms
-     * already guarantee.
+     * <p>Contiguity is a display-grid property, not a scheduling constraint
+     * (the six hard constraints from CLAUDE.md make no such requirement).
+     * First-fit contiguous packing fragments under realistic concurrent
+     * block patterns even when FTE-sum ≤ capacity holds at every
+     * half-hour — e.g. lanes 3 and 6 free but lanes 4–5 still occupied.
+     * Rather than reject a valid schedule, we emit non-contiguous lanes and
+     * keep going.
      *
-     * <p>If no valid lane range is found, throws — this would mean the
-     * algorithm output violates the FTE constraint (a real bug worth surfacing
-     * loudly rather than silently splitting blocks across non-contiguous lanes).
+     * <p>Only throws if fewer than {@code fte} lanes are free at the
+     * block's start time, which does indicate a real FTE-capacity
+     * violation in the algorithm output.
      */
     private void assignLanesForDay(List<PackingEntry> dayBlocks, int laneCount) {
         // lanes[i] holds the next half-hour at which lane i becomes free; 1-indexed.
@@ -271,7 +277,9 @@ public class SchedulingService {
 
         for (PackingEntry e : dayBlocks) {
             int fte = e.block.fteRequirement();
-            int chosen = -1;
+
+            // Try contiguous first.
+            int contiguousStart = -1;
             outer:
             for (int i = 1; i + fte - 1 <= laneCount; i++) {
                 for (int j = i; j < i + fte; j++) {
@@ -279,20 +287,38 @@ public class SchedulingService {
                         continue outer;
                     }
                 }
-                chosen = i;
+                contiguousStart = i;
                 break;
             }
-            if (chosen == -1) {
-                throw new IllegalStateException(
-                        "Lane packing failed for block " + e.block.id() +
-                        " on day " + e.dayIndex +
-                        " — algorithm output violates FTE constraint " +
-                        "(needs " + fte + " contiguous free lanes at half-hour " +
-                        e.startHalfHour + ", lane count is " + laneCount + ")");
+
+            int[] assigned;
+            if (contiguousStart >= 0) {
+                assigned = new int[fte];
+                for (int k = 0; k < fte; k++) {
+                    assigned[k] = contiguousStart + k;
+                }
+            } else {
+                // Fall back to any fte free lanes.
+                assigned = new int[fte];
+                int n = 0;
+                for (int i = 1; i <= laneCount && n < fte; i++) {
+                    if (lanes[i] <= e.startHalfHour) {
+                        assigned[n++] = i;
+                    }
+                }
+                if (n < fte) {
+                    throw new IllegalStateException(
+                            "Lane packing failed for block " + e.block.id() +
+                            " on day " + e.dayIndex +
+                            " — only " + n + " free lanes at half-hour " +
+                            e.startHalfHour + " but " + fte + " required " +
+                            "(lane count is " + laneCount + ")");
+                }
             }
-            e.laneStart = chosen;
-            e.laneEnd = chosen + fte - 1;
-            for (int j = chosen; j < chosen + fte; j++) {
+
+            e.laneStart = assigned[0];
+            e.laneEnd = assigned[fte - 1];
+            for (int j : assigned) {
                 lanes[j] = e.endHalfHour;
             }
         }
