@@ -173,6 +173,20 @@ public class CpSatScheduler implements Scheduler {
         }
         model.minimize(makespan);
 
+        // Optional warm-start hints: seed the solver with a feasible solution
+        // (typically from Candidate C). Hints guide search; they do not
+        // constrain, so an infeasible or stale hint is silently ignored.
+        @SuppressWarnings("unchecked")
+        Map<String, Integer> warmStartHints = (Map<String, Integer>) params.get("warmStartHints");
+        if (warmStartHints != null && !warmStartHints.isEmpty()) {
+            for (Block block : blocks) {
+                Integer hintStart = warmStartHints.get(block.id());
+                if (hintStart != null) {
+                    model.addHint(startVars.get(block.id()), hintStart);
+                }
+            }
+        }
+
         // Solve
         CpSolver solver = new CpSolver();
         solver.getParameters().setMaxTimeInSeconds(timeLimitSeconds);

@@ -66,6 +66,23 @@ public class SchedulingService {
                     request.candidateCWeight() != null ? request.candidateCWeight() : 0.5);
         }
 
+        // Optional warm-start: run Candidate C first and pass its start-time
+        // assignments to CP-SAT as solver hints. Only meaningful when the
+        // primary algorithm is B_CPSAT.
+        if (Boolean.TRUE.equals(request.warmStart()) && request.algorithm() == Algorithm.B_CPSAT) {
+            Map<String, Object> warmParams = new HashMap<>();
+            warmParams.put("candidateCWeight",
+                    request.candidateCWeight() != null ? request.candidateCWeight() : 0.0);
+            ScheduleResult warm = enhancedGreedyScheduler.schedule(blocks, shiftSchedule, warmParams);
+            if (warm.success() && warm.scheduledBlocks() != null) {
+                Map<String, Integer> hints = new HashMap<>();
+                for (ScheduledBlock sb : warm.scheduledBlocks()) {
+                    hints.put(sb.blockId(), sb.startTime());
+                }
+                params.put("warmStartHints", hints);
+            }
+        }
+
         // Select algorithm and run
         Scheduler scheduler = switch (request.algorithm()) {
             case A_MTS, A_SPT -> greedyScheduler;

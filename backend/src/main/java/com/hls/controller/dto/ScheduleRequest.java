@@ -9,5 +9,6 @@ public record ScheduleRequest(
     List<String> blockIds,
     List<ShiftDayDto> shiftSchedule,
     Integer cpSatTimeLimitSeconds,
-    Double candidateCWeight
+    Double candidateCWeight,
+    Boolean warmStart
 ) {}
