@@ -40,19 +40,48 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## Instances and naming
+
+**One Excel workbook = one instance = one ASML machine module.** Each
+file contains the full `Blocks` + `TDM` + `PDM` triple for that
+module — a complete, independent scheduling problem.
+
+The two arguments are deliberately decoupled:
+* `--data` is the **filename on disk** (looked up under `data/` if you
+  pass a bare name; full/relative paths also work).
+* `--instance-id` is the **stable label** that lands in every CSV row
+  and every thesis table. Use this when referring to the instance in
+  analysis, prose, or table headings.
+
+Convention used throughout this repo:
+
+| File on disk           | Instance id | Notes                                  |
+|------------------------|-------------|----------------------------------------|
+| `data/data_one.xlsx`   | `MOD_M1`    | First instance (the one already in the repo) |
+| `data/data_two.xlsx`   | `MOD_A`     | First Windows-laptop instance          |
+| `data/data_three.xlsx` | `MOD_B`     | Second Windows-laptop instance         |
+| `data/data_four.xlsx`  | `MOD_C`     | …continue alphabetically               |
+
+Result CSVs are keyed on the `instance_id`, so the same dataset is
+always reported under the same label even if the on-disk filename
+changes between machines.
+
 ## Running the experiments
 
-Place an instance Excel in `data/` (e.g. `data/data_one.xlsx`), then:
+Place an instance Excel in `data/`, then:
 
 ```sh
 # Compute structural features
-python scripts/instance_features.py --data data_one.xlsx --instance-id MOD_M1
+python scripts/instance_features.py --data data_two.xlsx --instance-id MOD_A
 
 # Run all 15 algorithm configurations
-python scripts/multi_instance_run.py --data data_one.xlsx --instance-id MOD_M1
+python scripts/multi_instance_run.py --data data_two.xlsx --instance-id MOD_A
 ```
 
-Both write to `results/` with stable filenames keyed on `--instance-id`.
+Both write to `results/` with stable filenames keyed on `--instance-id`
+(e.g. `results/run_MOD_A.csv`). To re-run the same instance, pass the
+same `--instance-id` and the script will overwrite the old row in the
+features CSV and produce a new run file.
 
 To collect the per-instance CSVs into the H1a/H1b/H1c summary:
 
