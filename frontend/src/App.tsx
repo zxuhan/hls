@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { getBlocks, postSchedule, reloadBlocks } from './api'
 import { BlockList } from './components/BlockList'
@@ -14,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import {
   Play,
@@ -44,6 +43,9 @@ const ALGORITHMS: { id: AlgorithmId; label: string }[] = [
 
 const C_WEIGHTS: CandidateCWeight[] = [0, 0.25, 0.5, 0.75, 1]
 
+const CPSAT_BACKEND_LIMIT_SECONDS = 86400
+const CLIENT_REQUEST_TIMEOUT_MS = 20 * 60 * 1000
+
 const INITIAL_DAYS: ShiftDay[] = [
   { shifts: [{ startHour: 1, durationHours: 14, fte: 6 }] },
 ]
@@ -53,10 +55,11 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [days, setDays] = useState<ShiftDay[]>(INITIAL_DAYS)
   const [algorithm, setAlgorithm] = useState<AlgorithmId>('A_MTS')
-  const [cpSatTimeLimitSeconds, setCpSatTimeLimitSeconds] = useState(60)
   const [candidateCWeight, setCandidateCWeight] =
     useState<CandidateCWeight>(0.5)
   const [loading, setLoading] = useState(false)
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
+  const tickerRef = useRef<number | null>(null)
   const [result, setResult] = useState<ScheduleResponse | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [violations, setViolations] = useState<LoaderViolation[] | null>(null)
@@ -120,11 +123,24 @@ export default function App() {
       blockIds: Array.from(selectedIds),
       shiftSchedule: days,
     }
-    if (algorithm === 'B_CPSAT') req.cpSatTimeLimitSeconds = cpSatTimeLimitSeconds
+    if (algorithm === 'B_CPSAT')
+      req.cpSatTimeLimitSeconds = CPSAT_BACKEND_LIMIT_SECONDS
     if (algorithm === 'C_ENHANCED') req.candidateCWeight = candidateCWeight
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      CLIENT_REQUEST_TIMEOUT_MS,
+    )
+    const startedAt = performance.now()
+    setElapsedMs(0)
+    tickerRef.current = window.setInterval(() => {
+      setElapsedMs(performance.now() - startedAt)
+    }, 250)
+
     try {
       setLoading(true)
-      const { status, body } = await postSchedule(req)
+      const { status, body } = await postSchedule(req, controller.signal)
       if (status === 200 && (body as ScheduleResponse).success) {
         const res = body as ScheduleResponse
         setResult(res)
@@ -140,17 +156,35 @@ export default function App() {
         setScheduleError(`Server error: ${status} ${msg}`)
       }
     } catch (err) {
-      setScheduleError(`Network error: ${String(err)}`)
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        const msg = `Request timed out after ${CLIENT_REQUEST_TIMEOUT_MS / 60000} minutes — try a faster algorithm or a smaller block set.`
+        setScheduleError(msg)
+        toast.error(msg)
+      } else {
+        setScheduleError(`Network error: ${String(err)}`)
+      }
     } finally {
+      clearTimeout(timeoutId)
+      if (tickerRef.current !== null) {
+        clearInterval(tickerRef.current)
+        tickerRef.current = null
+      }
+      setElapsedMs(null)
       setLoading(false)
     }
   }
 
-  const handleExport = () => {
-    if (result) {
-      exportSchedule(result, algorithm)
-      toast.success('Export started — .xlsx file will download shortly.')
+  useEffect(() => {
+    return () => {
+      if (tickerRef.current !== null) clearInterval(tickerRef.current)
     }
+  }, [])
+
+  const handleExport = () => {
+    if (!result) return
+    exportSchedule(result, blocks, algorithm)
+      .then(() => toast.success('Exported .xlsx.'))
+      .catch((err) => toast.error(`Export failed: ${String(err)}`))
   }
 
   return (
@@ -185,26 +219,6 @@ export default function App() {
                 </SelectContent>
               </Select>
 
-              {algorithm === 'B_CPSAT' && (
-                <div className="flex items-center gap-1.5">
-                  <label className="text-sm text-muted-foreground whitespace-nowrap">
-                    Time limit
-                  </label>
-                  <Input
-                    type="number"
-                    value={cpSatTimeLimitSeconds}
-                    onChange={(e) =>
-                      setCpSatTimeLimitSeconds(
-                        Math.max(1, parseInt(e.target.value, 10) || 1),
-                      )
-                    }
-                    className="w-20 bg-card"
-                    min={1}
-                  />
-                  <span className="text-xs text-muted-foreground">s</span>
-                </div>
-              )}
-
               {algorithm === 'C_ENHANCED' && (
                 <div className="flex items-center gap-1.5">
                   <label className="text-sm text-muted-foreground whitespace-nowrap">
@@ -232,7 +246,9 @@ export default function App() {
 
               <Button onClick={handleSchedule} disabled={!canSchedule} className="gap-2">
                 <Play className="h-4 w-4" />
-                {loading ? 'Scheduling...' : 'Schedule'}
+                {loading
+                  ? `Scheduling… ${elapsedMs !== null ? formatElapsed(elapsedMs) : ''}`
+                  : 'Schedule'}
               </Button>
             </div>
 
@@ -344,4 +360,12 @@ export default function App() {
 function extractFilename(message: string): string | null {
   const m = message.match(/from\s+(.+)$/)
   return m ? m[1].trim() : null
+}
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }

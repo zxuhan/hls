@@ -23,7 +23,10 @@ export async function reloadBlocks(): Promise<{
   return { status: res.status, body }
 }
 
-export async function postSchedule(req: ScheduleRequest): Promise<{
+export async function postSchedule(
+  req: ScheduleRequest,
+  signal?: AbortSignal,
+): Promise<{
   status: number
   body: ScheduleResponse | ErrorResponse
 }> {
@@ -31,6 +34,7 @@ export async function postSchedule(req: ScheduleRequest): Promise<{
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
+    signal,
   })
   const body = (await res.json()) as ScheduleResponse | ErrorResponse
   return { status: res.status, body }

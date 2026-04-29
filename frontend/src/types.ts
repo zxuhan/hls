@@ -14,6 +14,7 @@ export interface BlockDto {
   requiredToolName: string | null
   requiredToolExclusive: boolean | null
   predecessorBlockIds: string[]
+  colour: string
 }
 
 export interface BlockListResponse {
@@ -49,6 +50,7 @@ export interface ScheduledBlockDto {
   endHalfHour: number
   laneStart: number
   laneEnd: number
+  colour: string
 }
 
 export interface DaySummaryDto {

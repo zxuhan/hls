@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, X, CalendarDays } from 'lucide-react'
 import type { Shift, ShiftDay } from '../types'
+
+const DEFAULT_SHIFT: Shift = { startHour: 1, durationHours: 14, fte: 6 }
+const MAX_BULK_DAYS = 50
 
 interface Props {
   days: ShiftDay[]
@@ -43,6 +47,8 @@ export function validateShiftSchedule(days: ShiftDay[]): string[] {
 }
 
 export function ShiftEditor({ days, onChange }: Props) {
+  const [bulkCount, setBulkCount] = useState(10)
+
   const updateShift = (
     dayIdx: number,
     shiftIdx: number,
@@ -62,9 +68,7 @@ export function ShiftEditor({ days, onChange }: Props) {
 
   const addShift = (dayIdx: number) => {
     const next = days.map((d, i) =>
-      i === dayIdx
-        ? { shifts: [...d.shifts, { startHour: 1, durationHours: 14, fte: 6 }] }
-        : d,
+      i === dayIdx ? { shifts: [...d.shifts, { ...DEFAULT_SHIFT }] } : d,
     )
     onChange(next)
   }
@@ -83,8 +87,12 @@ export function ShiftEditor({ days, onChange }: Props) {
     onChange(next)
   }
 
-  const addDay = () => {
-    onChange([...days, { shifts: [{ startHour: 1, durationHours: 14, fte: 6 }] }])
+  const addDays = (n: number) => {
+    const clamped = Math.min(MAX_BULK_DAYS, Math.max(1, n))
+    const fresh: ShiftDay[] = Array.from({ length: clamped }, () => ({
+      shifts: [{ ...DEFAULT_SHIFT }],
+    }))
+    onChange([...days, ...fresh])
   }
 
   return (
@@ -210,13 +218,32 @@ export function ShiftEditor({ days, onChange }: Props) {
             </div>
           ))}
 
-          <Button
-            variant="outline"
-            className="w-full border-dashed gap-1.5 text-muted-foreground"
-            onClick={addDay}
-          >
-            <Plus className="h-4 w-4" /> Add day
-          </Button>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={bulkCount}
+              onChange={(e) =>
+                setBulkCount(
+                  Math.min(
+                    MAX_BULK_DAYS,
+                    Math.max(1, parseIntOr(e.target.value, 1)),
+                  ),
+                )
+              }
+              className="w-16 h-9"
+              min={1}
+              max={MAX_BULK_DAYS}
+            />
+            <Button
+              variant="outline"
+              className="flex-1 border-dashed gap-1.5 text-muted-foreground"
+              onClick={() => addDays(bulkCount)}
+              disabled={bulkCount < 1 || bulkCount > MAX_BULK_DAYS}
+            >
+              <Plus className="h-4 w-4" /> Add {bulkCount} day
+              {bulkCount === 1 ? '' : 's'}
+            </Button>
+          </div>
         </div>
       </ScrollArea>
     </div>

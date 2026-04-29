@@ -1,9 +1,25 @@
 import type { CSSProperties } from 'react'
-import { colorForBlockId } from '../color'
 import type { DaySummaryDto, ScheduleResponse, ScheduledBlockDto } from '../types'
 
 interface Props {
   result: ScheduleResponse
+}
+
+// Deterministic fallback palette (CSS) for blocks whose backend `colour` is
+// missing or unparseable — matches the export fallback in spirit.
+const FALLBACK_PALETTE = [
+  '#FDE68A', '#FCA5A5', '#A7F3D0', '#BAE6FD',
+  '#DDD6FE', '#FBCFE8', '#FDBA74', '#99F6E4',
+]
+
+function resolveColour(hex: string | null | undefined, seed: string): string {
+  if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) return hex
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return FALLBACK_PALETTE[(h >>> 0) % FALLBACK_PALETTE.length]
 }
 
 export function ResultGrid({ result }: Props) {
@@ -20,7 +36,6 @@ export function ResultGrid({ result }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Metrics bar */}
       <div className="flex items-center gap-4 rounded-lg bg-success/10 border border-success/20 px-4 py-2.5">
         <Metric
           label="Makespan"
@@ -41,9 +56,8 @@ export function ResultGrid({ result }: Props) {
         )}
       </div>
 
-      {/* Day grids */}
       {result.daySummaries.map((day) => (
-        <DayBlock
+        <DayGrid
           key={day.dayIndex}
           day={day}
           blocks={blocksByDay.get(day.dayIndex) ?? []}
@@ -66,7 +80,7 @@ function Separator() {
   return <div className="w-px h-8 bg-border" />
 }
 
-function DayBlock({
+function DayGrid({
   day,
   blocks,
 }: {
@@ -76,122 +90,87 @@ function DayBlock({
   const totalCols = day.totalHalfHours
   const hours = Math.ceil(totalCols / 2)
 
+  // Label column has a fixed minimum; half-hour cells share remaining width
+  // equally via 1fr so the grid stretches edge-to-edge at any container width.
   const gridStyle: CSSProperties = {
-    gridTemplateColumns: `var(--gutter-w) repeat(${totalCols}, var(--cell-w))`,
-    gridTemplateRows: `var(--col-header-h) var(--hour-header-h) repeat(${day.laneCount}, var(--lane-h))`,
+    gridTemplateColumns: `minmax(64px, max-content) repeat(${totalCols}, minmax(14px, 1fr))`,
+    gridTemplateRows: `var(--hour-header-h) repeat(${day.laneCount}, var(--lane-h))`,
   }
 
   return (
-    <div className="day-block">
-      <div className="day-header">Day {day.dayIndex}</div>
-
-      <div className="sheet-scroll">
-        <div className="sheet" style={gridStyle}>
-          {/* Top-left corner */}
-          <div
-            className="sheet-corner row-1"
-            style={{ gridRow: 1, gridColumn: 1 }}
-          />
-
-          {/* Column letters */}
-          {Array.from({ length: totalCols }, (_, i) => (
-            <div
-              key={`col-${i}`}
-              className="sheet-col-header"
-              style={{ gridRow: 1, gridColumn: i + 2 }}
-            >
-              {indexToColumnLetter(i)}
-            </div>
-          ))}
-
-          {/* Hour corner */}
-          <div
-            className="sheet-corner row-2"
-            style={{ gridRow: 2, gridColumn: 1 }}
-          >
-            #
-          </div>
-
-          {/* Hour labels */}
-          {Array.from({ length: hours }, (_, h) => {
-            const span = Math.min(2, totalCols - h * 2)
-            return (
-              <div
-                key={`hour-${h}`}
-                className="sheet-hour-header"
-                style={{
-                  gridRow: 2,
-                  gridColumn: `${h * 2 + 2} / span ${span}`,
-                }}
-              >
-                Hour {h + 1}
-              </div>
-            )
-          })}
-
-          {/* Lane row gutters */}
-          {Array.from({ length: day.laneCount }, (_, lane) => (
-            <div
-              key={`row-${lane}`}
-              className="sheet-row-header"
-              style={{ gridRow: lane + 3, gridColumn: 1 }}
-            >
-              {lane + 1}
-            </div>
-          ))}
-
-          {/* Lane row backgrounds */}
-          {Array.from({ length: day.laneCount }, (_, lane) => (
-            <div
-              key={`bg-${lane}`}
-              className={'sheet-row-bg' + (lane % 2 === 1 ? ' odd' : '')}
-              style={{
-                gridRow: lane + 3,
-                gridColumn: `2 / span ${totalCols}`,
-              }}
-            />
-          ))}
-
-          {/* Block cells */}
-          {blocks.map((blk) => {
-            const cellStyle: CSSProperties = {
-              gridRow: `${blk.laneStart + 2} / ${blk.laneEnd + 3}`,
-              gridColumn: `${blk.startHalfHour + 2} / ${blk.endHalfHour + 2}`,
-              ['--cell-bg' as string]: colorForBlockId(blk.blockId),
-            }
-            const dur = (blk.endHalfHour - blk.startHalfHour) / 2
-            const tooltip =
-              `id: ${blk.blockId}\n` +
-              `name: ${blk.name}\n` +
-              `FTE: ${blk.fteRequirement}\n` +
-              `duration: ${dur}h\n` +
-              `lanes: ${blk.laneStart}–${blk.laneEnd}\n` +
-              `hours: ${blk.startHalfHour / 2 + 1}–${blk.endHalfHour / 2}`
-            return (
-              <div
-                key={`${blk.blockId}-${blk.dayIndex}-${blk.startHalfHour}-${blk.laneStart}`}
-                className="sheet-block"
-                style={cellStyle}
-                title={tooltip}
-              >
-                <span className="sheet-block-id">{blk.blockId}</span>
-                <span className="sheet-block-name">{blk.name}</span>
-              </div>
-            )
-          })}
+    <div className="day-grid-wrap">
+      <div className="day-grid" style={gridStyle}>
+        {/* DAY N inline label */}
+        <div className="grid-cell grid-label day-label" style={{ gridRow: 1, gridColumn: 1 }}>
+          DAY {day.dayIndex}
         </div>
+
+        {/* Hour labels — each spans the 2 half-hour cells that make up the hour */}
+        {Array.from({ length: hours }, (_, h) => {
+          const span = Math.min(2, totalCols - h * 2)
+          return (
+            <div
+              key={`hour-${h}`}
+              className="grid-cell grid-hour-label"
+              style={{ gridRow: 1, gridColumn: `${h * 2 + 2} / span ${span}` }}
+            >
+              {h + 1}
+            </div>
+          )
+        })}
+
+        {/* Eng k lane labels */}
+        {Array.from({ length: day.laneCount }, (_, lane) => (
+          <div
+            key={`lane-${lane}`}
+            className="grid-cell grid-label lane-label"
+            style={{ gridRow: lane + 2, gridColumn: 1 }}
+          >
+            Eng {lane + 1}
+          </div>
+        ))}
+
+        {/* Empty cell backgrounds — rendered as individual half-hour cells so
+            the borders line up with the hour labels above. */}
+        {Array.from({ length: day.laneCount }).flatMap((_, lane) =>
+          Array.from({ length: totalCols }, (_, col) => (
+            <div
+              key={`bg-${lane}-${col}`}
+              className="grid-cell grid-empty"
+              style={{ gridRow: lane + 2, gridColumn: col + 2 }}
+            />
+          )),
+        )}
+
+        {/* Blocks — each occupies a merged rectangle.
+              gridRow: laneStart..laneEnd lanes (grid rows laneStart+1..laneEnd+1)
+              gridCol: startHalfHour..endHalfHour half-hour cells */}
+        {blocks.map((blk) => {
+          const bg = resolveColour(blk.colour, blk.blockId)
+          const style: CSSProperties = {
+            gridRow: `${blk.laneStart + 1} / ${blk.laneEnd + 2}`,
+            gridColumn: `${blk.startHalfHour + 2} / ${blk.endHalfHour + 2}`,
+            background: bg,
+          }
+          const dur = (blk.endHalfHour - blk.startHalfHour) / 2
+          const tooltip =
+            `id: ${blk.blockId}\n` +
+            `name: ${blk.name}\n` +
+            `FTE: ${blk.fteRequirement}\n` +
+            `duration: ${dur}h\n` +
+            `hours: ${blk.startHalfHour / 2 + 1}–${blk.endHalfHour / 2 + 1}`
+          return (
+            <div
+              key={`${blk.blockId}-${blk.dayIndex}-${blk.startHalfHour}-${blk.laneStart}`}
+              className="grid-cell grid-block"
+              style={style}
+              title={tooltip}
+            >
+              {blk.name}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
-}
-
-function indexToColumnLetter(i: number): string {
-  let n = i
-  let s = ''
-  while (true) {
-    s = String.fromCharCode(65 + (n % 26)) + s
-    n = Math.floor(n / 26) - 1
-    if (n < 0) break
-  }
-  return s
 }

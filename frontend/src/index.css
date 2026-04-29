@@ -39,11 +39,8 @@
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
 
-    /* Excel-like sheet metrics */
-    --cell-w: 22px;
+    /* Result grid metrics */
     --lane-h: 28px;
-    --gutter-w: 44px;
-    --col-header-h: 22px;
     --hour-header-h: 24px;
   }
 }
@@ -60,158 +57,76 @@
   }
 }
 
-/* ─── Excel-style sheet (Result Grid) ──────────────────────────────────── */
+/* ─── Result grid (merged-cell day view) ──────────────────────────────── */
 
-.day-block {
-  margin-bottom: 22px;
-}
-.day-block:last-child {
-  margin-bottom: 0;
-}
-
-.day-header {
-  font-weight: 700;
-  color: hsl(var(--foreground));
-  margin-bottom: 6px;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.day-header::before {
-  content: '';
-  display: inline-block;
-  width: 3px;
-  height: 14px;
-  background: hsl(var(--primary));
-  border-radius: 2px;
-}
-
-.sheet-scroll {
+.day-grid-wrap {
   border: 1px solid hsl(var(--border));
   border-radius: calc(var(--radius) - 4px);
   background: hsl(var(--card));
-  overflow: auto;
-  max-height: 70vh;
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+.day-grid-wrap:last-child {
+  margin-bottom: 0;
 }
 
-.sheet {
+.day-grid {
   display: grid;
-  position: relative;
+  width: 100%;
   background: hsl(var(--card));
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.sheet-corner {
-  background: hsl(var(--accent));
-  border-right: 1px solid hsl(var(--border));
-  border-bottom: 1px solid hsl(var(--border));
-  position: sticky;
-  left: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: hsl(var(--muted-foreground));
-  font-weight: 600;
-}
-.sheet-corner.row-1 {
-  top: 0;
-}
-.sheet-corner.row-2 {
-  top: var(--col-header-h);
-}
-
-.sheet-col-header {
-  height: var(--col-header-h);
-  background: hsl(var(--accent));
+.grid-cell {
   border-right: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: hsl(var(--muted-foreground));
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-.sheet-hour-header {
-  height: var(--hour-header-h);
-  background: hsl(var(--secondary));
-  border-right: 1px solid hsl(var(--border));
-  border-bottom: 1px solid hsl(var(--border));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  position: sticky;
-  top: var(--col-header-h);
-  z-index: 2;
-}
-
-.sheet-row-header {
-  width: var(--gutter-w);
-  background: hsl(var(--accent));
-  border-right: 1px solid hsl(var(--border));
-  border-bottom: 1px solid hsl(var(--border));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: hsl(var(--muted-foreground));
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  height: var(--lane-h);
-}
-
-.sheet-row-bg {
-  background: hsl(var(--card));
-  border-bottom: 1px solid hsl(var(--border));
-}
-.sheet-row-bg.odd {
-  background: hsl(var(--secondary));
-}
-
-.sheet-block {
-  background-color: color-mix(in srgb, var(--cell-bg, hsl(199 89% 70%)) 22%, white);
-  color: hsl(var(--foreground));
-  border: 1px solid color-mix(in srgb, var(--cell-bg, hsl(199 89% 48%)) 55%, white);
-  border-radius: calc(var(--radius) - 4px);
-  margin: 1px;
-  padding: 2px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  text-align: center;
+  padding: 2px 4px;
+  min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
+}
+
+.grid-label {
+  background: hsl(var(--accent));
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+.day-label {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.lane-label {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.grid-hour-label {
+  background: hsl(var(--secondary));
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  height: var(--hour-header-h);
+}
+
+.grid-empty {
+  background: hsl(var(--card));
+}
+
+.grid-block {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1.2;
+  word-break: break-word;
+  white-space: normal;
   cursor: default;
   z-index: 1;
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
+  transition: box-shadow 0.12s ease;
 }
-.sheet-block:hover {
-  box-shadow: 0 0 0 2px hsl(var(--primary)), 0 4px 16px rgba(11, 31, 74, 0.08);
+.grid-block:hover {
+  box-shadow: inset 0 0 0 2px hsl(var(--primary));
   z-index: 5;
-}
-
-.sheet-block-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  font-weight: 700;
-  color: hsl(199 89% 30%);
-  flex-shrink: 0;
-}
-
-.sheet-block-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
