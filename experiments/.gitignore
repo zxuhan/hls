@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Instance Excel files contain (masked) ASML data; keep them off GitHub.
+data/*.xlsx
+data/*.xls
+
+# Results CSVs ARE tracked — they're the experimental record for the thesis.

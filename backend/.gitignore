@@ -42,3 +42,9 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Experiment outputs ###
+scripts/results/
+scripts/.venv/
+scripts/__pycache__/
+scripts/lib/__pycache__/
