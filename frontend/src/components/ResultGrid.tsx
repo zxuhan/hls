@@ -12,6 +12,26 @@ interface Props {
 const FALLBACK_PALETTE = ['#FDE68A', '#BAE6FD', '#A7F3D0', '#FBCFE8']
 const BACKEND_DEFAULT_COLOUR = '#FFFF00'
 
+// Group sorted lane numbers into maximal contiguous runs.
+// e.g. [3, 4, 6] → [{start: 3, end: 4}, {start: 6, end: 6}]
+function groupContiguousLanes(lanes: number[]): { start: number; end: number }[] {
+  if (lanes.length === 0) return []
+  const runs: { start: number; end: number }[] = []
+  let runStart = lanes[0]
+  let prev = lanes[0]
+  for (let i = 1; i < lanes.length; i++) {
+    if (lanes[i] === prev + 1) {
+      prev = lanes[i]
+    } else {
+      runs.push({ start: runStart, end: prev })
+      runStart = lanes[i]
+      prev = lanes[i]
+    }
+  }
+  runs.push({ start: runStart, end: prev })
+  return runs
+}
+
 function resolveColour(hex: string | null | undefined, seed: string): string {
   if (
     hex &&
@@ -148,33 +168,39 @@ function DayGrid({
           )),
         )}
 
-        {/* Blocks — each occupies a merged rectangle.
-              gridRow: laneStart..laneEnd lanes (grid rows laneStart+1..laneEnd+1)
+        {/* Blocks — one rectangle per maximal contiguous run of lanes.
+              Non-contiguous lanes (e.g. [3, 6]) produce two rectangles so
+              the gap remains free for whatever else lives in lanes 4-5.
+              gridRow: lane numbers (1-indexed lane → grid row lane + 1)
               gridCol: startHalfHour..endHalfHour half-hour cells */}
-        {blocks.map((blk) => {
+        {blocks.flatMap((blk) => {
           const bg = resolveColour(blk.colour, blk.blockId)
-          const style: CSSProperties = {
-            gridRow: `${blk.laneStart + 1} / ${blk.laneEnd + 2}`,
-            gridColumn: `${blk.startHalfHour + 2} / ${blk.endHalfHour + 2}`,
-            background: bg,
-          }
           const dur = (blk.endHalfHour - blk.startHalfHour) / 2
           const tooltip =
             `id: ${blk.blockId}\n` +
             `name: ${blk.name}\n` +
             `FTE: ${blk.fteRequirement}\n` +
             `duration: ${dur}h\n` +
-            `hours: ${blk.startHalfHour / 2 + 1}–${blk.endHalfHour / 2 + 1}`
-          return (
-            <div
-              key={`${blk.blockId}-${blk.dayIndex}-${blk.startHalfHour}-${blk.laneStart}`}
-              className="grid-cell grid-block"
-              style={style}
-              title={tooltip}
-            >
-              {blk.name}
-            </div>
-          )
+            `hours: ${blk.startHalfHour / 2 + 1}–${blk.endHalfHour / 2 + 1}\n` +
+            `lanes: ${blk.lanes.join(', ')}`
+          const runs = groupContiguousLanes(blk.lanes)
+          return runs.map((run, idx) => {
+            const style: CSSProperties = {
+              gridRow: `${run.start + 1} / ${run.end + 2}`,
+              gridColumn: `${blk.startHalfHour + 2} / ${blk.endHalfHour + 2}`,
+              background: bg,
+            }
+            return (
+              <div
+                key={`${blk.blockId}-${blk.dayIndex}-${blk.startHalfHour}-${run.start}-${idx}`}
+                className="grid-cell grid-block"
+                style={style}
+                title={tooltip}
+              >
+                {blk.name}
+              </div>
+            )
+          })
         })}
       </div>
     </div>

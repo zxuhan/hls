@@ -48,8 +48,9 @@ export interface ScheduledBlockDto {
   dayIndex: number
   startHalfHour: number
   endHalfHour: number
-  laneStart: number
-  laneEnd: number
+  // 1-indexed lane numbers, sorted ascending. May be non-contiguous —
+  // render one rectangle per maximal contiguous run.
+  lanes: number[]
   colour: string
 }
 

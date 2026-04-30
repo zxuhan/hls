@@ -10,8 +10,10 @@ import com.hls.model.ScheduledBlock;
 import com.hls.model.ShiftDay;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -169,17 +171,14 @@ class SchedulingServicePostProcessingTest {
         // Then S1 (alphabetical) → lane 4.
         // Then S2 → lane 5.
         ScheduledBlockDto bigDto = findById(dtos, "BIG");
-        assertThat(bigDto.laneStart()).isEqualTo(1);
-        assertThat(bigDto.laneEnd()).isEqualTo(3);
-        assertThat(bigDto.laneEnd() - bigDto.laneStart() + 1).isEqualTo(bigDto.fteRequirement());
+        assertThat(bigDto.lanes()).containsExactly(1, 2, 3);
+        assertThat(bigDto.lanes().length).isEqualTo(bigDto.fteRequirement());
 
         ScheduledBlockDto s1Dto = findById(dtos, "S1");
-        assertThat(s1Dto.laneStart()).isEqualTo(4);
-        assertThat(s1Dto.laneEnd()).isEqualTo(4);
+        assertThat(s1Dto.lanes()).containsExactly(4);
 
         ScheduledBlockDto s2Dto = findById(dtos, "S2");
-        assertThat(s2Dto.laneStart()).isEqualTo(5);
-        assertThat(s2Dto.laneEnd()).isEqualTo(5);
+        assertThat(s2Dto.lanes()).containsExactly(5);
     }
 
     @Test
@@ -212,7 +211,13 @@ class SchedulingServicePostProcessingTest {
                 boolean overlap = !(x.endHalfHour() <= y.startHalfHour()
                         || y.endHalfHour() <= x.startHalfHour());
                 if (overlap) {
-                    assertThat(x.laneEnd() < y.laneStart() || y.laneEnd() < x.laneStart())
+                    Set<Integer> xLanes = new HashSet<>();
+                    for (int l : x.lanes()) xLanes.add(l);
+                    boolean disjoint = true;
+                    for (int l : y.lanes()) {
+                        if (xLanes.contains(l)) { disjoint = false; break; }
+                    }
+                    assertThat(disjoint)
                             .as("Concurrent blocks %s and %s must have disjoint lanes", x.blockId(), y.blockId())
                             .isTrue();
                 }

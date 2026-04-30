@@ -248,8 +248,7 @@ public class SchedulingService {
                     e.dayIndex,
                     e.startHalfHour,
                     e.endHalfHour,
-                    e.laneStart,
-                    e.laneEnd,
+                    e.lanes,
                     e.block.colour()
             ));
         }
@@ -257,12 +256,13 @@ public class SchedulingService {
     }
 
     /**
-     * Greedy lane packing. Tries contiguous {@code [laneStart..laneEnd]}
-     * first (ideal for the rendering grid); if first-fit can't find a
-     * contiguous range, falls back to any {@code fte} free lanes — the block
-     * still uses exactly {@code fte} lanes, but those lanes may be
-     * non-adjacent. {@code laneStart}/{@code laneEnd} then hold the min/max
-     * of the assigned lanes, with possible gaps inside the range.
+     * Greedy lane packing. Tries contiguous lanes first (ideal for the
+     * rendering grid); if first-fit can't find a contiguous range, falls
+     * back to any {@code fte} free lanes — the block still uses exactly
+     * {@code fte} lanes, but those lanes may be non-adjacent.
+     * {@code PackingEntry.lanes} then holds the assigned lane indices in
+     * sorted order; the frontend renders one rectangle per maximal
+     * contiguous run.
      *
      * <p>Contiguity is a display-grid property, not a scheduling constraint
      * (the six hard constraints from CLAUDE.md make no such requirement).
@@ -330,8 +330,9 @@ public class SchedulingService {
                 }
             }
 
-            e.laneStart = assigned[0];
-            e.laneEnd = assigned[fte - 1];
+            // assigned[] is already sorted ascending: contiguous case fills
+            // it sequentially, non-contiguous case scans i = 1..laneCount.
+            e.lanes = assigned;
             for (int j : assigned) {
                 lanes[j] = e.endHalfHour;
             }
@@ -344,8 +345,7 @@ public class SchedulingService {
         final int dayIndex;
         final int startHalfHour;
         final int endHalfHour;
-        int laneStart;
-        int laneEnd;
+        int[] lanes;
 
         PackingEntry(Block block, int dayIndex, int startHalfHour, int endHalfHour) {
             this.block = block;
