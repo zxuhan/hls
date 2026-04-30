@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { getBlocks, postSchedule, reloadBlocks } from './api'
-import { BlockList } from './components/BlockList'
+import { BlockList, type SelectionMode } from './components/BlockList'
 import { ResultGrid } from './components/ResultGrid'
 import { ShiftEditor, validateShiftSchedule } from './components/ShiftEditor'
 import { ViolationModal } from './components/ViolationModal'
@@ -29,6 +29,7 @@ import type {
   CandidateCWeight,
   ErrorResponse,
   LoaderViolation,
+  PartDto,
   ScheduleRequest,
   ScheduleResponse,
   ShiftDay,
@@ -52,7 +53,10 @@ const INITIAL_DAYS: ShiftDay[] = [
 
 export default function App() {
   const [blocks, setBlocks] = useState<BlockDto[]>([])
+  const [parts, setParts] = useState<PartDto[]>([])
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('blocks')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(new Set())
   const [days, setDays] = useState<ShiftDay[]>(INITIAL_DAYS)
   const [algorithm, setAlgorithm] = useState<AlgorithmId>('A_MTS')
   const [candidateCWeight, setCandidateCWeight] =
@@ -72,8 +76,12 @@ export default function App() {
     getBlocks()
       .then((res) => {
         if (cancelled) return
-        if (res.success) setBlocks(res.blocks)
-        else setBootstrapError(res.errorMessage ?? 'Failed to load blocks')
+        if (res.success) {
+          setBlocks(res.blocks)
+          setParts(res.parts ?? [])
+        } else {
+          setBootstrapError(res.errorMessage ?? 'Failed to load blocks')
+        }
       })
       .catch((err) => {
         if (!cancelled) setBootstrapError(String(err))
@@ -85,16 +93,35 @@ export default function App() {
 
   const shiftErrors = useMemo(() => validateShiftSchedule(days), [days])
 
-  const noBlocksSelected = selectedIds.size === 0
+  // Block IDs to actually schedule. In blocks mode this is the user's
+  // explicit selection; in parts mode it's the deduplicated union of every
+  // selected part's blockIds.
+  const effectiveBlockIds = useMemo(() => {
+    if (selectionMode === 'blocks') return Array.from(selectedIds)
+    const set = new Set<string>()
+    for (const part of parts) {
+      if (!selectedPartIds.has(part.id)) continue
+      for (const id of part.blockIds) set.add(id)
+    }
+    return Array.from(set)
+  }, [selectionMode, selectedIds, selectedPartIds, parts])
+
+  const noBlocksSelected = effectiveBlockIds.length === 0
   const canSchedule = !loading && !noBlocksSelected && shiftErrors.length === 0
   const showNotice = shiftErrors.length > 0 || noBlocksSelected
 
   const warnings = useMemo(() => {
     const w: string[] = []
-    if (noBlocksSelected) w.push('Select at least one block to schedule.')
+    if (noBlocksSelected) {
+      w.push(
+        selectionMode === 'blocks'
+          ? 'Select at least one block to schedule.'
+          : 'Select at least one part (with blocks) to schedule.',
+      )
+    }
     w.push(...shiftErrors)
     return w
-  }, [noBlocksSelected, shiftErrors])
+  }, [noBlocksSelected, selectionMode, shiftErrors])
 
   const handleReload = async () => {
     try {
@@ -102,8 +129,12 @@ export default function App() {
       const { status, body } = await reloadBlocks()
       if (status === 200 && body.success) {
         const blocksRes = await getBlocks()
-        if (blocksRes.success) setBlocks(blocksRes.blocks)
+        if (blocksRes.success) {
+          setBlocks(blocksRes.blocks)
+          setParts(blocksRes.parts ?? [])
+        }
         setSelectedIds(new Set())
+        setSelectedPartIds(new Set())
         toast.success('File reloaded successfully.')
         setFileLabel(extractFilename(body.message) ?? fileLabel)
       } else {
@@ -120,7 +151,7 @@ export default function App() {
     setScheduleError(null)
     const req: ScheduleRequest = {
       algorithm,
-      blockIds: Array.from(selectedIds),
+      blockIds: effectiveBlockIds,
       shiftSchedule: days,
     }
     if (algorithm === 'B_CPSAT')
@@ -298,8 +329,13 @@ export default function App() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-6">
           <BlockList
             blocks={blocks}
-            selectedIds={selectedIds}
-            onChange={setSelectedIds}
+            parts={parts}
+            mode={selectionMode}
+            onModeChange={setSelectionMode}
+            selectedBlockIds={selectedIds}
+            onBlockSelectionChange={setSelectedIds}
+            selectedPartIds={selectedPartIds}
+            onPartSelectionChange={setSelectedPartIds}
           />
           <ShiftEditor days={days} onChange={setDays} />
         </div>

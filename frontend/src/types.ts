@@ -17,10 +17,16 @@ export interface BlockDto {
   colour: string
 }
 
+export interface PartDto {
+  id: string
+  blockIds: string[]
+}
+
 export interface BlockListResponse {
   success: boolean
   errorMessage: string | null
   blocks: BlockDto[]
+  parts: PartDto[]
 }
 
 export interface Shift {

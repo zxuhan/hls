@@ -303,17 +303,20 @@ def _parse_tdm(sheet, known_ids: set[str], violations: list[Violation]) -> dict[
             violations.append(Violation(SHEET_TDM, "-", "TDM_UNKNOWN_BLOCK",
                                         f"label '{label}' not present in Blocks sheet"))
 
-    # Cells: row r col c (both 1-based in matrix interior) → pred=row_labels[r-1], succ=col_labels[c-1]
+    # Cells: row r col c (both 1-based in matrix interior).
+    # Convention: an X at (row r, col c) means col_labels[c-1] (the
+    # predecessor) must finish before row_labels[r-1] (the successor).
+    # Each row lists its predecessors in the columns.
     for r in range(1, len(rows)):
         row = rows[r]
-        pred_label = row_labels[r - 1]
-        if pred_label is None:
+        succ_label = row_labels[r - 1]
+        if succ_label is None:
             continue
         for c in range(1, len(row)):
             if c - 1 >= len(col_labels):
                 continue
-            succ_label = col_labels[c - 1]
-            if succ_label is None:
+            pred_label = col_labels[c - 1]
+            if pred_label is None:
                 continue
             if pred_label == succ_label:
                 continue  # diagonal: silently ignore

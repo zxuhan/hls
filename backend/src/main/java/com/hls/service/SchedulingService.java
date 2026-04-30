@@ -29,7 +29,10 @@ public class SchedulingService {
     public BlockListResponse getAllBlocks() {
         List<Block> blocks = blockRepository.getAllBlocks();
         List<BlockDto> dtos = blocks.stream().map(this::toBlockDto).toList();
-        return new BlockListResponse(true, null, dtos);
+        List<PartDto> partDtos = blockRepository.getAllParts().stream()
+                .map(p -> new PartDto(p.id(), p.blockIds()))
+                .toList();
+        return new BlockListResponse(true, null, dtos, partDtos);
     }
 
     public ScheduleResponse runSchedule(ScheduleRequest request) {

@@ -1,6 +1,7 @@
 package com.hls.loader;
 
 import com.hls.model.Block;
+import com.hls.model.Part;
 import com.hls.model.ToolRequirement;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
@@ -48,6 +49,7 @@ public class ExcelBlockRepository implements BlockRepository {
     private static final String SHEET_BLOCKS = "Blocks";
     private static final String SHEET_TDM = "TDM";
     private static final String SHEET_PDM = "PDM";
+    private static final String SHEET_BLOCKS_PARTS = "Blocks_Parts";
 
     // ── Required Blocks-sheet headers ──────────────────────────────────────
     private static final String COL_HL_BLOCK = "HL Block";
@@ -74,6 +76,7 @@ public class ExcelBlockRepository implements BlockRepository {
 
     private final Map<String, Block> blockMap;
     private final List<Block> blockList;
+    private final List<Part> partList;
 
     public ExcelBlockRepository(String filePath) {
         LoaderValidationReport report = new LoaderValidationReport();
@@ -96,6 +99,11 @@ public class ExcelBlockRepository implements BlockRepository {
             Set<String> knownBlockIds = rawBlocks.keySet();
             Map<String, List<String>> tdmEdges = parseTdmSheet(tdmSheet, knownBlockIds, report);
             Map<String, Set<String>> pdmZones = parsePdmSheet(pdmSheet, knownBlockIds, report);
+            // Optional sheet — null when absent. Loader proceeds with empty parts.
+            Sheet partsSheet = findOptionalSheet(workbook, SHEET_BLOCKS_PARTS);
+            List<Part> parts = partsSheet == null
+                    ? List.of()
+                    : parseBlocksPartsSheet(partsSheet, rawBlocks, report);
 
             if (report.hasViolations()) {
                 throw new LoaderValidationException(report);
@@ -111,8 +119,10 @@ public class ExcelBlockRepository implements BlockRepository {
 
             this.blockMap = assembleBlocks(rawBlocks, tdmEdges, pdmZones);
             this.blockList = List.copyOf(blockMap.values());
+            this.partList = List.copyOf(parts);
 
-            log.info("Loaded {} blocks from {}", blockList.size(), filePath);
+            log.info("Loaded {} blocks and {} parts from {}",
+                    blockList.size(), partList.size(), filePath);
 
         } catch (LoaderValidationException e) {
             log.error("Excel data validation failed for {}:\n{}", filePath, e.getReport().format());
@@ -135,6 +145,11 @@ public class ExcelBlockRepository implements BlockRepository {
         return blockMap.get(id);
     }
 
+    @Override
+    public List<Part> getAllParts() {
+        return partList;
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // Sheet lookup
     // ────────────────────────────────────────────────────────────────────────
@@ -148,6 +163,17 @@ public class ExcelBlockRepository implements BlockRepository {
         }
         report.addSheetLevel(required, "MISSING_SHEET",
                 "required sheet '" + required + "' not found in workbook (sheet name lookup is case-insensitive)");
+        return null;
+    }
+
+    /** Lookup variant for optional sheets: returns {@code null} silently when absent. */
+    private static Sheet findOptionalSheet(Workbook workbook, String name) {
+        for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+            String sheetName = workbook.getSheetName(i);
+            if (sheetName != null && sheetName.trim().equalsIgnoreCase(name)) {
+                return workbook.getSheetAt(i);
+            }
+        }
         return null;
     }
 
@@ -440,11 +466,13 @@ public class ExcelBlockRepository implements BlockRepository {
             return predecessors;
         }
 
-        // Walk the matrix interior
+        // Walk the matrix interior. Convention: an X at (row i, col j) means
+        // col j (the predecessor) must finish before row i (the successor)
+        // — each row lists its predecessors in the columns.
         for (int i = 0; i < rowLabels.size(); i++) {
             Row row = sheet.getRow(i + 1);
             if (row == null) continue;
-            String predecessorId = rowLabels.get(i);
+            String successorId = rowLabels.get(i);
             for (int j = 0; j < colLabels.size(); j++) {
                 if (i == j) continue; // rule 17: skip diagonal
                 Cell cell = row.getCell(j + 1);
@@ -458,7 +486,7 @@ public class ExcelBlockRepository implements BlockRepository {
                             "TDM cell must be empty or 'X'; got '" + trimmed + "'");
                     continue;
                 }
-                String successorId = colLabels.get(j);
+                String predecessorId = colLabels.get(j);
                 predecessors.computeIfAbsent(successorId, k -> new ArrayList<>()).add(predecessorId);
             }
         }
@@ -553,6 +581,114 @@ public class ExcelBlockRepository implements BlockRepository {
             }
             // Rule 22: empty row (no zones occupied) is allowed
             result.put(blockId, occupied);
+        }
+        return result;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Blocks_Parts sheet (optional; frontend grouping for batch selection)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Parse the optional {@code Blocks_Parts} sheet. Layout mirrors PDM:
+     * column A holds block IDs, row 1 holds part names, an {@code X} at row
+     * <i>i</i> / col <i>j</i> means block <i>i</i> belongs to part <i>j</i>.
+     * Returns parts in column order. Each part's blockIds preserve the order
+     * the blocks appear in the {@code Blocks} sheet (i.e., the iteration order
+     * of {@code rawBlocks}).
+     */
+    private static List<Part> parseBlocksPartsSheet(
+            Sheet sheet, Map<String, RawBlock> rawBlocks, LoaderValidationReport report) {
+
+        Row header = sheet.getRow(0);
+        if (header == null) {
+            // An empty optional sheet is harmless — nothing to parse.
+            return List.of();
+        }
+
+        // Column labels = part names. Non-empty + case-sensitively unique.
+        List<String> partLabels = new ArrayList<>();
+        Set<String> seenParts = new HashSet<>();
+        for (int c = 1; c < header.getLastCellNum(); c++) {
+            String name = ExcelCellReader.readString(header.getCell(c));
+            if (name == null) {
+                partLabels.add(null);
+                continue;
+            }
+            String trimmed = name.trim();
+            if (trimmed.isEmpty()) {
+                partLabels.add(null);
+                continue;
+            }
+            if (!seenParts.add(trimmed)) {
+                report.add(SHEET_BLOCKS_PARTS, 0, c, "PARTS_DUPLICATE_PART",
+                        "duplicate part name '" + trimmed + "' (part names are case-sensitive)");
+            }
+            partLabels.add(trimmed);
+        }
+        while (!partLabels.isEmpty() && partLabels.get(partLabels.size() - 1) == null) {
+            partLabels.remove(partLabels.size() - 1);
+        }
+        for (int j = 0; j < partLabels.size(); j++) {
+            if (partLabels.get(j) == null) {
+                report.add(SHEET_BLOCKS_PARTS, 0, j + 1, "PARTS_EMPTY_PART_LABEL",
+                        "part label at column " + (j + 1) + " is empty but appears between non-empty labels");
+            }
+        }
+
+        // Walk rows; for each (row, col) mark, append blockId to the matching part's list.
+        // Use a LinkedHashMap keyed by part label so insertion order matches column order.
+        Map<String, List<String>> partToBlockIds = new LinkedHashMap<>();
+        for (String label : partLabels) {
+            if (label != null) partToBlockIds.put(label, new ArrayList<>());
+        }
+
+        Set<String> knownBlockIds = rawBlocks.keySet();
+        // Track membership per (part, block) to dedupe when a row appears twice.
+        Map<String, Set<String>> seenMembers = new HashMap<>();
+
+        for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            String label = ExcelCellReader.readString(row.getCell(0));
+            if (label == null) {
+                if (!isRowEmptyEntirely(row)) {
+                    report.add(SHEET_BLOCKS_PARTS, r, 0, "PARTS_MISSING_ROW_LABEL",
+                            "row has data but the block-id cell is empty");
+                }
+                continue;
+            }
+            String blockId = label.trim();
+            if (!knownBlockIds.contains(blockId)) {
+                report.add(SHEET_BLOCKS_PARTS, r, 0, "PARTS_UNKNOWN_BLOCK",
+                        "block '" + blockId + "' referenced in Blocks_Parts is not defined in the Blocks sheet");
+                continue;
+            }
+
+            for (int j = 0; j < partLabels.size(); j++) {
+                Cell cell = row.getCell(j + 1);
+                if (cell == null || cell.getCellType() == CellType.BLANK) continue;
+                String value = ExcelCellReader.readString(cell);
+                if (value == null) continue;
+                String trimmed = value.trim();
+                if (!trimmed.equalsIgnoreCase("X")) {
+                    report.add(SHEET_BLOCKS_PARTS, r, j + 1, "PARTS_INVALID_MARKER",
+                            "Blocks_Parts cell must be empty or 'X'; got '" + trimmed + "'");
+                    continue;
+                }
+                String part = partLabels.get(j);
+                if (part == null) continue; // already reported as PARTS_EMPTY_PART_LABEL
+                Set<String> members = seenMembers.computeIfAbsent(part, k -> new HashSet<>());
+                if (members.add(blockId)) {
+                    partToBlockIds.get(part).add(blockId);
+                }
+            }
+        }
+
+        // Return in column order, preserving block-row order inside each part.
+        List<Part> result = new ArrayList<>(partToBlockIds.size());
+        for (Map.Entry<String, List<String>> e : partToBlockIds.entrySet()) {
+            result.add(new Part(e.getKey(), e.getValue()));
         }
         return result;
     }

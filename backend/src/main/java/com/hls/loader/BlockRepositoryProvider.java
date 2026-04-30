@@ -1,6 +1,7 @@
 package com.hls.loader;
 
 import com.hls.model.Block;
+import com.hls.model.Part;
 
 import java.util.List;
 
@@ -52,5 +53,10 @@ public class BlockRepositoryProvider implements BlockRepository {
     @Override
     public Block getBlockById(String id) {
         return current.getBlockById(id);
+    }
+
+    @Override
+    public List<Part> getAllParts() {
+        return current.getAllParts();
     }
 }

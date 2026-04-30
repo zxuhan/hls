@@ -8,5 +8,6 @@ import java.util.List;
 public record BlockListResponse(
     boolean success,
     String errorMessage,
-    List<BlockDto> blocks
+    List<BlockDto> blocks,
+    List<PartDto> parts
 ) {}
