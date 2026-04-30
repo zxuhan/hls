@@ -5,15 +5,21 @@ interface Props {
   result: ScheduleResponse
 }
 
-// Deterministic fallback palette (CSS) for blocks whose backend `colour` is
-// missing or unparseable — matches the export fallback in spirit.
-const FALLBACK_PALETTE = [
-  '#FDE68A', '#FCA5A5', '#A7F3D0', '#BAE6FD',
-  '#DDD6FE', '#FBCFE8', '#FDBA74', '#99F6E4',
-]
+// Deterministic fallback palette (yellow, blue, green, pink). Used both when
+// the backend sends no colour and when it sends the sentinel `#FFFF00`
+// (Block.DEFAULT_COLOUR) — the latter would otherwise paint every block
+// the same bright yellow.
+const FALLBACK_PALETTE = ['#FDE68A', '#BAE6FD', '#A7F3D0', '#FBCFE8']
+const BACKEND_DEFAULT_COLOUR = '#FFFF00'
 
 function resolveColour(hex: string | null | undefined, seed: string): string {
-  if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) return hex
+  if (
+    hex &&
+    hex.toUpperCase() !== BACKEND_DEFAULT_COLOUR &&
+    /^#[0-9a-fA-F]{6}$/.test(hex)
+  ) {
+    return hex
+  }
   let h = 2166136261 >>> 0
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i)
