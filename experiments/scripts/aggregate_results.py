@@ -44,7 +44,7 @@ def _to_int(s: str | None) -> int | None:
 def load_per_run() -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for p in sorted(RESULTS_DIR.glob("run_*.csv")):
-        with p.open(newline="") as f:
+        with p.open(newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 out.append(row)
     return out
@@ -152,7 +152,9 @@ def write_csv(path: Path, rows: list[dict[str, str]], columns: list[str]) -> Non
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as f:
+    # encoding="utf-8" so γ in C_ENHANCED config labels round-trips on Windows,
+    # whose default cp1252 codec can't encode it.
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
