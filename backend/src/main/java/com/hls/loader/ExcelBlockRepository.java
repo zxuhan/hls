@@ -292,33 +292,18 @@ public class ExcelBlockRepository implements BlockRepository {
             }
 
             // ── TOOLS / TOOLS AMOUNT (rules 9, 10) ─────────────────────────
-            // A tool name without an amount means "no exclusivity constraint",
-            // i.e. treated the same as 'Multiple'. An amount without a tool
-            // name is still meaningless and reported.
+            // Tool acts as a constraint ONLY when TOOLS is non-empty AND
+            // TOOLS AMOUNT, after trim and lowercase, equals "one". Every
+            // other combination — tool without amount, amount without tool,
+            // "Multiple", or any unrecognised amount — is treated as no
+            // constraint, with no violation reported. Real datasets often
+            // list a tool without specifying availability.
             String toolName = ExcelCellReader.readString(row.getCell(toolsCol));
             String toolsAmount = ExcelCellReader.readString(row.getCell(toolsAmountCol));
             ToolRequirement requiredTool = null;
-            boolean toolNamePresent = toolName != null;
-            boolean toolsAmountPresent = toolsAmount != null;
-            if (!toolNamePresent && toolsAmountPresent) {
-                report.add(SHEET_BLOCKS, r, toolsCol, "TOOLS_INCONSISTENT",
-                        "'" + COL_TOOLS_AMOUNT + "' is set but '" + COL_TOOLS + "' is empty");
-            } else if (toolNamePresent) {
-                String normalizedName = toolName.trim().toLowerCase(Locale.ROOT);
-                if (!toolsAmountPresent) {
-                    // Empty amount → same semantics as 'Multiple' (non-exclusive).
-                    requiredTool = new ToolRequirement(normalizedName, false);
-                } else {
-                    String normalizedAmount = toolsAmount.trim().toLowerCase(Locale.ROOT);
-                    if (normalizedAmount.equals("one")) {
-                        requiredTool = new ToolRequirement(normalizedName, true);
-                    } else if (normalizedAmount.equals("multiple")) {
-                        requiredTool = new ToolRequirement(normalizedName, false);
-                    } else {
-                        report.add(SHEET_BLOCKS, r, toolsAmountCol, "TOOLS_AMOUNT_INVALID",
-                                "'" + COL_TOOLS_AMOUNT + "' must be 'One', 'Multiple', or empty; got '" + toolsAmount + "'");
-                    }
-                }
+            if (toolName != null && toolsAmount != null
+                    && toolsAmount.trim().toLowerCase(Locale.ROOT).equals("one")) {
+                requiredTool = new ToolRequirement(toolName.trim().toLowerCase(Locale.ROOT), true);
             }
 
             // ── 8 position axes (rule 11) ──────────────────────────────────

@@ -216,25 +216,18 @@ def _parse_blocks(sheet, violations: list[Violation]) -> dict[str, _RawBlock]:
             fte_req = int(round(fte_val))
 
         # ── Tools ──
+        # Tool acts as a constraint ONLY when TOOLS is non-empty AND TOOLS AMOUNT,
+        # after trim and lowercase, equals "one". Real datasets often list a tool
+        # without specifying availability — those rows are treated as unconstrained.
         tool_name = _read_string(row[tools_col]) if tools_col < len(row) else None
         tool_amount = _read_string(row[tools_amount_col]) if tools_amount_col < len(row) else None
         required_tool: ToolRequirement | None = None
-        tool_present = tool_name is not None
-        amount_present = tool_amount is not None
-        if tool_present != amount_present:
-            violations.append(Violation(SHEET_BLOCKS, _cell_ref(r, tools_col), "TOOLS_INCONSISTENT",
-                                        "exactly one of TOOLS / TOOLS AMOUNT is empty"))
-        elif tool_present:
-            normalized = tool_name.strip().lower()  # type: ignore[union-attr]
-            amount_norm = tool_amount.strip().lower()  # type: ignore[union-attr]
-            if amount_norm == "one":
-                required_tool = ToolRequirement(normalized, True)
-            elif amount_norm == "multiple":
-                required_tool = ToolRequirement(normalized, False)
-            else:
-                violations.append(Violation(SHEET_BLOCKS, _cell_ref(r, tools_amount_col),
-                                            "TOOLS_AMOUNT_INVALID",
-                                            f"TOOLS AMOUNT must be 'One' or 'Multiple'; got '{tool_amount}'"))
+        if (
+            tool_name is not None
+            and tool_amount is not None
+            and tool_amount.strip().lower() == "one"
+        ):
+            required_tool = ToolRequirement(tool_name.strip().lower(), True)
 
         # ── Position axes ──
         position_axes: dict[str, str] = {}
