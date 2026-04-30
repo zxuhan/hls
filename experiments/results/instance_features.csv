@@ -1,2 +1,4 @@
 instance_id,block_count,total_work_h,max_block_dur_h,mean_block_dur_h,max_axes_per_block,mean_axes_per_block,count_axis_rich_blocks,fte_peak,fte_total_h,count_fte_heavy_blocks,dag_node_count,dag_edge_count,dag_depth,dag_width,precedence_density,zone_count,tool_count_unique,tool_count_exclusive
+MOD_A,100,458.0,10.0,4.58,3,0.91,1,5,1112.0,15,100,214,29,31,0.0432,27,0,0
+MOD_B,90,300.0,10.0,3.33,0,0.0,0,5,683.0,9,90,138,11,27,0.0345,31,1,1
 MOD_M1,100,458.0,10.0,4.58,4,0.75,4,5,1112.0,15,100,214,29,31,0.0432,16,0,0
