@@ -61,18 +61,10 @@ public class ExcelBlockRepository implements BlockRepository {
     private static final List<String> POSITION_AXES = List.of(
             "WS", "(-) WS", "WSSC", "ILL", "RS", "RH Turret", "WH", "RH Library");
 
-    /** All headers expected on the Blocks sheet, in declaration order. */
-    private static final List<String> REQUIRED_BLOCKS_HEADERS;
-    static {
-        List<String> headers = new ArrayList<>();
-        headers.add(COL_HL_BLOCK);
-        headers.add(COL_HRS);
-        headers.add(COL_FTE);
-        headers.add(COL_TOOLS);
-        headers.add(COL_TOOLS_AMOUNT);
-        headers.addAll(POSITION_AXES);
-        REQUIRED_BLOCKS_HEADERS = List.copyOf(headers);
-    }
+    /** Headers that must be present on the Blocks sheet. The 8 position-axis
+     * headers and {@code Colour} are optional and handled separately. */
+    private static final List<String> REQUIRED_BLOCKS_HEADERS = List.of(
+            COL_HL_BLOCK, COL_HRS, COL_FTE, COL_TOOLS, COL_TOOLS_AMOUNT);
 
     private final Map<String, Block> blockMap;
     private final List<Block> blockList;
@@ -222,6 +214,12 @@ public class ExcelBlockRepository implements BlockRepository {
         int fteCol = requiredCols.get(COL_FTE);
         int toolsCol = requiredCols.get(COL_TOOLS);
         int toolsAmountCol = requiredCols.get(COL_TOOLS_AMOUNT);
+        // Optional axis headers — missing axis = "no constraint on this axis for any block".
+        Map<String, Integer> axisCols = new LinkedHashMap<>();
+        for (String axis : POSITION_AXES) {
+            Integer axisIdx = headerIndex.get(axis.toLowerCase(Locale.ROOT));
+            if (axisIdx != null) axisCols.put(axis, axisIdx);
+        }
         // Optional column — -1 means "not present; every block defaults to yellow"
         Integer colourIdx = headerIndex.get(COL_COLOUR.toLowerCase(Locale.ROOT));
         int colourCol = colourIdx == null ? -1 : colourIdx;
@@ -232,8 +230,11 @@ public class ExcelBlockRepository implements BlockRepository {
             Row row = sheet.getRow(r);
             if (row == null) continue;
 
-            // Detect fully-empty row → skip silently (rule 12)
-            if (isRowEmpty(row, requiredCols.values())) continue;
+            // Detect fully-empty row → skip silently (rule 12). Axis cells count:
+            // a row with only axis data but no HL Block still triggers BLOCKS_MISSING_ID.
+            List<Integer> knownCols = new ArrayList<>(requiredCols.values());
+            knownCols.addAll(axisCols.values());
+            if (isRowEmpty(row, knownCols)) continue;
 
             // ── HL Block (rules 4, 5) ──────────────────────────────────────
             String id = ExcelCellReader.readString(row.getCell(idCol));
@@ -307,9 +308,12 @@ public class ExcelBlockRepository implements BlockRepository {
             }
 
             // ── 8 position axes (rule 11) ──────────────────────────────────
+            // Only axes whose header is present participate; missing headers
+            // leave that axis unconstrained for every block.
             Map<String, String> positionAxes = new LinkedHashMap<>();
-            for (String axis : POSITION_AXES) {
-                int col = requiredCols.get(axis);
+            for (Map.Entry<String, Integer> e : axisCols.entrySet()) {
+                String axis = e.getKey();
+                int col = e.getValue();
                 Cell cell = row.getCell(col);
                 if (cell == null || cell.getCellType() == CellType.BLANK) continue;
                 if (cell.getCellType() != CellType.STRING) {

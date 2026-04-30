@@ -46,7 +46,6 @@ REQUIRED_BLOCKS_HEADERS: tuple[str, ...] = (
     COL_FTE,
     COL_TOOLS,
     COL_TOOLS_AMOUNT,
-    *POSITION_AXES,
 )
 
 
@@ -158,6 +157,13 @@ def _parse_blocks(sheet, violations: list[Violation]) -> dict[str, _RawBlock]:
     if missing_any:
         return raw
 
+    # Optional axis headers — missing axis = "no constraint on this axis for any block".
+    axis_cols: dict[str, int] = {}
+    for axis in POSITION_AXES:
+        idx = header_index.get(axis.lower())
+        if idx is not None:
+            axis_cols[axis] = idx
+
     id_col = required_cols[COL_HL_BLOCK]
     hrs_col = required_cols[COL_HRS]
     fte_col = required_cols[COL_FTE]
@@ -165,9 +171,11 @@ def _parse_blocks(sheet, violations: list[Violation]) -> dict[str, _RawBlock]:
     tools_amount_col = required_cols[COL_TOOLS_AMOUNT]
 
     seen_ids: set[str] = set()
+    known_cols: tuple[int, ...] = tuple(list(required_cols.values()) + list(axis_cols.values()))
     for r, row in enumerate(rows[1:], start=1):
-        # Skip fully-empty rows silently
-        if all(_read_string(row[c]) is None for c in required_cols.values() if c < len(row)):
+        # Skip fully-empty rows silently. Axis cells count: a row with axis
+        # data but no HL Block is still a row-with-data and reports BLOCKS_MISSING_ID.
+        if all(_read_string(row[c]) is None for c in known_cols if c < len(row)):
             continue
 
         # ── HL Block ──
@@ -230,9 +238,10 @@ def _parse_blocks(sheet, violations: list[Violation]) -> dict[str, _RawBlock]:
             required_tool = ToolRequirement(tool_name.strip().lower(), True)
 
         # ── Position axes ──
+        # Only axes whose header is present participate; missing headers leave
+        # the axis unconstrained for every block.
         position_axes: dict[str, str] = {}
-        for axis in POSITION_AXES:
-            col = required_cols[axis]
+        for axis, col in axis_cols.items():
             cell = row[col] if col < len(row) else None
             val = _read_string(cell)
             if val is None:
