@@ -4,6 +4,7 @@ import com.hls.algorithm.CpSatScheduler;
 import com.hls.algorithm.EnhancedGreedyScheduler;
 import com.hls.algorithm.GreedyScheduler;
 import com.hls.algorithm.Scheduler;
+import com.hls.algorithm.TimelineHelper;
 import com.hls.controller.dto.*;
 import com.hls.loader.BlockRepository;
 import com.hls.model.*;
@@ -205,15 +206,11 @@ public class SchedulingService {
             Map<String, Block> blocksById,
             List<DaySummaryDto> daySummaries) {
 
-        // Cumulative horizon offset per day: half-hour 0 of day k =
-        // sum of totalHalfHours of days 1..k-1 in horizon-relative units.
-        int[] horizonOffset = new int[daySummaries.size() + 2];
-        for (int i = 0; i < daySummaries.size(); i++) {
-            horizonOffset[i + 1] = horizonOffset[i] + daySummaries.get(i).totalHalfHours();
-        }
-
         // Group scheduled blocks by day, converting to day-relative half-hours.
-        // We use a mutable holder so we can stamp lane assignments after packing.
+        // The algorithm's absolute timeline uses TimelineHelper.SLOTS_PER_DAY
+        // slots per calendar day (a fixed 48 = 24 hours × 2), independent of
+        // the shift's actual duration. So day k starts at absolute time
+        // (k - 1) * SLOTS_PER_DAY — NOT at sum of prior totalHalfHours.
         Map<Integer, List<PackingEntry>> blocksByDay = new TreeMap<>();
         for (ScheduledBlock sb : scheduled) {
             Block block = blocksById.get(sb.blockId());
@@ -221,7 +218,7 @@ public class SchedulingService {
                 throw new IllegalStateException(
                         "Algorithm returned unknown block id: " + sb.blockId());
             }
-            int offset = horizonOffset[sb.dayIndex() - 1];
+            int offset = (sb.dayIndex() - 1) * TimelineHelper.SLOTS_PER_DAY;
             int startHalfHour = sb.startTime() - offset;
             int endHalfHour = sb.endTime() - offset;
             blocksByDay.computeIfAbsent(sb.dayIndex(), k -> new ArrayList<>())

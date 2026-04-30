@@ -105,11 +105,13 @@ class SchedulingServicePostProcessingTest {
         Block blk2 = simpleBlock("BLK-002", "Install laser", 10, 2);
         Block blk3 = simpleBlock("BLK-003", "Calibration sweep", 4, 1);
 
-        // Algorithm output is HORIZON-relative: BLK-002 on day 2 starts at half-hour 28.
+        // Algorithm output is HORIZON-relative on a fixed 48-half-hour-per-day
+        // grid (TimelineHelper.SLOTS_PER_DAY). Day 2 therefore starts at
+        // absolute time 48, regardless of how long the day's shift actually is.
         List<ScheduledBlock> scheduled = List.of(
                 new ScheduledBlock("BLK-001", 0, 6, 1),
                 new ScheduledBlock("BLK-003", 6, 10, 1),
-                new ScheduledBlock("BLK-002", 28, 38, 2)
+                new ScheduledBlock("BLK-002", 48, 58, 2)
         );
 
         List<ScheduledBlockDto> dtos = service.buildScheduledBlockDtos(
@@ -133,7 +135,7 @@ class SchedulingServicePostProcessingTest {
         assertThat(d3.startHalfHour()).isEqualTo(6);
         assertThat(d3.endHalfHour()).isEqualTo(10);
 
-        // BLK-002 on day 2: horizon offset 28 → day-relative start 0.
+        // BLK-002 on day 2: absolute 48 minus day-2 offset (48) → day-relative 0.
         ScheduledBlockDto d2 = dtos.get(2);
         assertThat(d2.dayIndex()).isEqualTo(2);
         assertThat(d2.startHalfHour()).isZero();
