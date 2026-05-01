@@ -1,12 +1,17 @@
 """Combine per-instance result CSVs into the H1a/H1b/H1c summary tables.
 
 Reads every ``results/run_*.csv``, joins with ``results/instance_features.csv``
-when present, computes per-instance optimality gaps against the best CPSAT
-makespan, and writes:
+when present, computes per-instance optimality gaps against two CPSAT-derived
+references — ``best feasible makespan`` (``gap_vs_cpsat``) and ``proven lower
+bound`` (``gap_vs_lower_bound``) — and writes:
 
-  * ``results/aggregate_per_run.csv``      — every row from every instance + computed gap
+  * ``results/aggregate_per_run.csv``      — every row from every instance + both gaps
   * ``results/aggregate_per_instance.csv`` — one row per (instance, algorithm-config)
   * ``results/h1_summary.csv``             — H1a / H1b / H1c verdicts across instances
+
+The two gaps coincide when CPSAT proves optimality (best == bound). They diverge
+on time-limited instances where CPSAT could not close the gap; the lower-bound
+column then gives the rigorous (conservative) optimality gap.
 
 A console report mirrors the CSV summary so the script is useful by itself.
 
@@ -64,17 +69,42 @@ def cpsat_optimum_per_instance(rows: Iterable[dict[str, str]]) -> dict[str, int]
     return best
 
 
-def annotate_gap(rows: list[dict[str, str]], optimum: dict[str, int]) -> None:
+def cpsat_lower_bound_per_instance(rows: Iterable[dict[str, str]]) -> dict[str, int]:
+    """Tightest CPSAT-reported lower bound per instance (max across runs)."""
+    bound: dict[str, int] = {}
     for r in rows:
-        opt = optimum.get(r["instance_id"])
-        if opt is None or r["success"] != "Y":
-            r["gap_vs_cpsat"] = ""
+        if r["algorithm"] != "B_CPSAT" or r["success"] != "Y":
             continue
+        b = _to_int(r.get("best_bound_days"))
+        if b is None:
+            continue
+        cur = bound.get(r["instance_id"])
+        if cur is None or b > cur:
+            bound[r["instance_id"]] = b
+    return bound
+
+
+def annotate_gap(
+    rows: list[dict[str, str]],
+    optimum: dict[str, int],
+    lower_bound: dict[str, int],
+) -> None:
+    for r in rows:
         m = _to_int(r.get("makespan_days"))
-        if m is None or opt <= 0:
+        opt = optimum.get(r["instance_id"])
+        lb = lower_bound.get(r["instance_id"])
+
+        if r["success"] != "Y" or m is None:
             r["gap_vs_cpsat"] = ""
+            r["gap_vs_lower_bound"] = ""
             continue
-        r["gap_vs_cpsat"] = f"{(m - opt) / opt:.6f}"
+
+        r["gap_vs_cpsat"] = (
+            f"{(m - opt) / opt:.6f}" if opt is not None and opt > 0 else ""
+        )
+        r["gap_vs_lower_bound"] = (
+            f"{(m - lb) / lb:.6f}" if lb is not None and lb > 0 else ""
+        )
 
 
 def algo_label(r: dict[str, str]) -> str:
@@ -107,6 +137,8 @@ def aggregate_per_instance(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         rt_vals = [v for v in rt_vals if v is not None]
         gap_vals = [_to_float(r.get("gap_vs_cpsat")) for r in success_runs]
         gap_vals = [v for v in gap_vals if v is not None]
+        lb_gap_vals = [_to_float(r.get("gap_vs_lower_bound")) for r in success_runs]
+        lb_gap_vals = [v for v in lb_gap_vals if v is not None]
         out.append({
             "instance_id": instance,
             "config": label,
@@ -117,6 +149,7 @@ def aggregate_per_instance(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "mean_runtime_ms": str(round(mean(rt_vals), 1)) if rt_vals else "",
             "median_runtime_ms": str(round(median(rt_vals), 1)) if rt_vals else "",
             "mean_gap_vs_cpsat": f"{mean(gap_vals):.4f}" if gap_vals else "",
+            "mean_gap_vs_lower_bound": f"{mean(lb_gap_vals):.4f}" if lb_gap_vals else "",
         })
     return out
 
@@ -132,6 +165,7 @@ def h1_summary(per_instance: list[dict[str, str]], gap_threshold: float) -> list
         n_inst = len(rows)
         succ_inst = sum(1 for r in rows if float(r["feasibility_rate"]) == 1.0)
         gaps = [float(r["mean_gap_vs_cpsat"]) for r in rows if r["mean_gap_vs_cpsat"]]
+        lb_gaps = [float(r["mean_gap_vs_lower_bound"]) for r in rows if r["mean_gap_vs_lower_bound"]]
         within_threshold = sum(1 for g in gaps if g <= gap_threshold)
         out.append({
             "config": config,
@@ -141,6 +175,8 @@ def h1_summary(per_instance: list[dict[str, str]], gap_threshold: float) -> list
             "instances_with_gap": str(len(gaps)),
             "mean_gap": f"{mean(gaps):.4f}" if gaps else "",
             "median_gap": f"{median(gaps):.4f}" if gaps else "",
+            "mean_gap_lb": f"{mean(lb_gaps):.4f}" if lb_gaps else "",
+            "median_gap_lb": f"{median(lb_gaps):.4f}" if lb_gaps else "",
             f"within_{int(gap_threshold * 100)}pct_count": str(within_threshold),
             f"within_{int(gap_threshold * 100)}pct_rate": (
                 f"{within_threshold / len(gaps):.3f}" if gaps else ""),
@@ -166,14 +202,14 @@ def print_h1_console(rows: list[dict[str, str]], gap_threshold: float) -> None:
         return
     pct_col = f"within_{int(gap_threshold * 100)}pct_rate"
     print(f"\n=== Per-config summary across instances (gap threshold = {gap_threshold:.2f}) ===")
-    print(f"{'config':<32} {'feas%':>6} {'mean_gap':>10} {'median_gap':>11} {'within%':>9}")
-    print("-" * 75)
+    print(f"{'config':<32} {'feas%':>6} {'mean_gap':>10} {'mean_gap_lb':>12} {'within%':>9}")
+    print("-" * 78)
     for r in rows:
         feas_pct = float(r["feasibility_rate"]) * 100 if r["feasibility_rate"] else 0
         gap_str = r["mean_gap"] or "-"
-        med_str = r["median_gap"] or "-"
+        gap_lb_str = r["mean_gap_lb"] or "-"
         within_str = r[pct_col] if r[pct_col] else "-"
-        print(f"{r['config']:<32} {feas_pct:>5.1f}% {gap_str:>10} {med_str:>11} {within_str:>9}")
+        print(f"{r['config']:<32} {feas_pct:>5.1f}% {gap_str:>10} {gap_lb_str:>12} {within_str:>9}")
 
 
 def main() -> int:
@@ -187,11 +223,13 @@ def main() -> int:
         print(f"No run_*.csv found in {RESULTS_DIR}")
         return 1
     optimum = cpsat_optimum_per_instance(rows)
-    annotate_gap(rows, optimum)
+    lower_bound = cpsat_lower_bound_per_instance(rows)
+    annotate_gap(rows, optimum, lower_bound)
 
     per_run_cols = list(rows[0].keys())
-    if "gap_vs_cpsat" not in per_run_cols:
-        per_run_cols.append("gap_vs_cpsat")
+    for extra in ("gap_vs_cpsat", "gap_vs_lower_bound"):
+        if extra not in per_run_cols:
+            per_run_cols.append(extra)
 
     write_csv(RESULTS_DIR / "aggregate_per_run.csv", rows, per_run_cols)
 
@@ -199,13 +237,15 @@ def main() -> int:
     write_csv(RESULTS_DIR / "aggregate_per_instance.csv", per_instance,
               ["instance_id", "config", "n_runs", "feasibility_rate",
                "best_makespan_days", "mean_makespan_days",
-               "mean_runtime_ms", "median_runtime_ms", "mean_gap_vs_cpsat"])
+               "mean_runtime_ms", "median_runtime_ms",
+               "mean_gap_vs_cpsat", "mean_gap_vs_lower_bound"])
 
     summary = h1_summary(per_instance, args.gap_threshold)
     pct = int(args.gap_threshold * 100)
     write_csv(RESULTS_DIR / "h1_summary.csv", summary,
               ["config", "n_instances", "instances_feasible", "feasibility_rate",
                "instances_with_gap", "mean_gap", "median_gap",
+               "mean_gap_lb", "median_gap_lb",
                f"within_{pct}pct_count", f"within_{pct}pct_rate"])
 
     print(f"Loaded {len(rows)} runs across {len(set(r['instance_id'] for r in rows))} instances")
