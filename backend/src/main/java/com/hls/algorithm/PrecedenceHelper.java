@@ -114,6 +114,92 @@ public final class PrecedenceHelper {
         return count;
     }
 
+    /**
+     * Rewrites each selected block's predecessor list so it includes the
+     * selected ancestors reachable through unselected intermediaries in the
+     * full TDM.
+     *
+     * <p>Example: full TDM has {@code A→B→C}. The user selects {@code {A, C}}.
+     * Block A's direct predecessor B is not in the selection, so the schedulers'
+     * {@code .filter(blockIds::contains)} drops it and A appears unconstrained
+     * — but A implicitly depends on C through B. Walking upstream from B
+     * reaches C, which is selected, so A's effective predecessor list becomes
+     * {@code [C]} and the implicit dependency is preserved.
+     *
+     * <p>The walk stops at the first selected ancestor on each branch (a
+     * transitive reduction within the selected subgraph): walking past that
+     * ancestor would only re-add edges already implied by that ancestor's own
+     * rewritten predecessor list. When the selection contains every block, no
+     * rewriting happens — every direct predecessor is already selected, so
+     * the walk terminates immediately and the original predecessor list is
+     * returned unchanged.
+     *
+     * @param selectedBlocks blocks the user picked, in user-supplied order
+     * @param allBlocks      every block in the repository (full TDM source)
+     * @return new Block instances with rewritten predecessor lists; iteration
+     *         order matches {@code selectedBlocks}
+     */
+    public static List<Block> resolveTransitivePredecessors(
+            List<Block> selectedBlocks, List<Block> allBlocks) {
+        Map<String, List<String>> directPreds = new HashMap<>();
+        for (Block b : allBlocks) {
+            directPreds.put(b.id(), b.predecessorBlockIds());
+        }
+        Set<String> selectedIds = new HashSet<>();
+        for (Block b : selectedBlocks) {
+            selectedIds.add(b.id());
+        }
+
+        List<Block> rewritten = new ArrayList<>(selectedBlocks.size());
+        for (Block b : selectedBlocks) {
+            List<String> effective = walkSelectedAncestors(b.id(), directPreds, selectedIds);
+            if (effective.equals(b.predecessorBlockIds())) {
+                // No bridge through an unselected block — keep the original
+                // instance so the algorithm sees the same object identity.
+                rewritten.add(b);
+            } else {
+                rewritten.add(new Block(
+                        b.id(),
+                        b.name(),
+                        b.durationHalfHours(),
+                        b.fteRequirement(),
+                        b.occupiedZones(),
+                        b.positionAxes(),
+                        b.requiredTool(),
+                        effective,
+                        b.colour()
+                ));
+            }
+        }
+        return rewritten;
+    }
+
+    private static List<String> walkSelectedAncestors(
+            String blockId,
+            Map<String, List<String>> directPreds,
+            Set<String> selectedIds) {
+        LinkedHashSet<String> collected = new LinkedHashSet<>();
+        Set<String> visited = new HashSet<>();
+        Deque<String> stack = new ArrayDeque<>();
+        for (String p : directPreds.getOrDefault(blockId, List.of())) {
+            stack.push(p);
+        }
+        while (!stack.isEmpty()) {
+            String p = stack.pop();
+            if (!visited.add(p)) continue;
+            if (selectedIds.contains(p)) {
+                collected.add(p);
+                // Stop here: p's own predecessors are resolved in p's pass,
+                // and transitivity carries them through.
+            } else {
+                for (String upstream : directPreds.getOrDefault(p, List.of())) {
+                    stack.push(upstream);
+                }
+            }
+        }
+        return new ArrayList<>(collected);
+    }
+
     public static Map<String, Integer> computeCriticalPathRemaining(List<Block> blocks) {
         Map<String, Block> blockMap = new HashMap<>();
         for (Block b : blocks) {

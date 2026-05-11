@@ -3,6 +3,7 @@ package com.hls.service;
 import com.hls.algorithm.CpSatScheduler;
 import com.hls.algorithm.EnhancedGreedyScheduler;
 import com.hls.algorithm.GreedyScheduler;
+import com.hls.algorithm.PrecedenceHelper;
 import com.hls.algorithm.Scheduler;
 import com.hls.algorithm.TimelineHelper;
 import com.hls.controller.dto.*;
@@ -45,6 +46,15 @@ public class SchedulingService {
             }
             blocks.add(block);
         }
+
+        // The TDM stores only direct edges, so when the user picks a subset of
+        // blocks an implicit dependency can exist between two selected blocks
+        // via an unselected intermediary (A→B→C, selection {A, C} ⇒ A still
+        // depends on C). Rewrite each selected block's predecessor list to
+        // include those transitive selected ancestors before handing the set
+        // to the scheduler. When every block is selected this is a no-op.
+        blocks = PrecedenceHelper.resolveTransitivePredecessors(
+                blocks, blockRepository.getAllBlocks());
 
         // Validate Candidate C weight
         if (request.algorithm() == Algorithm.C_ENHANCED) {

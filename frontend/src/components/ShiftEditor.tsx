@@ -47,7 +47,15 @@ export function validateShiftSchedule(days: ShiftDay[]): string[] {
 }
 
 export function ShiftEditor({ days, onChange }: Props) {
-  const [bulkCount, setBulkCount] = useState(10)
+  // Stored as a string so mid-edit values like "" or "12" can sit in the box
+  // without snapping. Clamping `bulkCount` on every keystroke caused
+  // "10" → delete → "1" → type "20" → display "120" → clamp to 50.
+  const [bulkCountInput, setBulkCountInput] = useState('10')
+  const parsedBulkCount = parseInt(bulkCountInput, 10)
+  const bulkCountValid =
+    Number.isFinite(parsedBulkCount) &&
+    parsedBulkCount >= 1 &&
+    parsedBulkCount <= MAX_BULK_DAYS
 
   const updateShift = (
     dayIdx: number,
@@ -221,15 +229,13 @@ export function ShiftEditor({ days, onChange }: Props) {
           <div className="flex items-center gap-2">
             <Input
               type="number"
-              value={bulkCount}
-              onChange={(e) =>
-                setBulkCount(
-                  Math.min(
-                    MAX_BULK_DAYS,
-                    Math.max(1, parseIntOr(e.target.value, 1)),
-                  ),
-                )
-              }
+              value={bulkCountInput}
+              onChange={(e) => setBulkCountInput(e.target.value)}
+              onBlur={() => {
+                // Snap back to a usable value once editing is over so the
+                // box never lingers empty or out-of-range.
+                if (!bulkCountValid) setBulkCountInput('10')
+              }}
               className="w-16 h-9"
               min={1}
               max={MAX_BULK_DAYS}
@@ -237,11 +243,13 @@ export function ShiftEditor({ days, onChange }: Props) {
             <Button
               variant="outline"
               className="flex-1 border-dashed gap-1.5 text-muted-foreground"
-              onClick={() => addDays(bulkCount)}
-              disabled={bulkCount < 1 || bulkCount > MAX_BULK_DAYS}
+              onClick={() => bulkCountValid && addDays(parsedBulkCount)}
+              disabled={!bulkCountValid}
             >
-              <Plus className="h-4 w-4" /> Add {bulkCount} day
-              {bulkCount === 1 ? '' : 's'}
+              <Plus className="h-4 w-4" />
+              {bulkCountValid
+                ? `Add ${parsedBulkCount} day${parsedBulkCount === 1 ? '' : 's'}`
+                : 'Add days'}
             </Button>
           </div>
         </div>
