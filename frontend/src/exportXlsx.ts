@@ -7,7 +7,7 @@ import type {
 
 // Flat-table sheet columns. Order matches the row payload below.
 const TASK_COLUMNS = [
-  'blocks', 'day', 'hour_start', 'end_hour', 'duration',
+  'task', 'day', 'hour_start', 'end_hour_in_day', 'duration',
   'fte', 'location', 'loto', 'ws', 'rs',
 ] as const
 
@@ -46,10 +46,10 @@ function writeTasksSheet(
 ): void {
   const sheet = wb.addWorksheet('Tasks')
   sheet.columns = [
-    { header: 'blocks', width: 28 },
+    { header: 'task', width: 28 },
     { header: 'day', width: 5 },
     { header: 'hour_start', width: 11 },
-    { header: 'end_hour', width: 11 },
+    { header: 'end_hour_in_day', width: 11 },
     { header: 'duration', width: 9 },
     { header: 'fte', width: 5 },
     { header: 'location', width: 22 },
