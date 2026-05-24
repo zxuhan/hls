@@ -1,0 +1,6 @@
+timestamp,instance_id,budget_s,run_idx,horizon_days,shift_hours,shift_fte,success,error_message,makespan_days,runtime_ms,best_bound_days,internal_gap,proved_optimal
+2026-05-24T10:42:43,MOD_A,0.1,1,30,14,6,N,No feasible schedule found by CP-SAT solver within time limit,,144,,,N
+2026-05-24T10:42:43,MOD_A,1.0,1,30,14,6,Y,,19,1085,17,0.105263,N
+2026-05-24T10:42:44,MOD_A,10.0,1,30,14,6,Y,,19,6364,19,0.0,Y
+2026-05-24T10:42:50,MOD_A,60.0,1,30,14,6,Y,,19,8710,19,0.0,Y
+2026-05-24T10:42:59,MOD_A,600.0,1,30,14,6,Y,,19,7456,19,0.0,Y
