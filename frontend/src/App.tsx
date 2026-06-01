@@ -5,7 +5,7 @@ import { BlockList, type SelectionMode } from './components/BlockList'
 import { ResultGrid } from './components/ResultGrid'
 import { ShiftEditor, validateShiftSchedule } from './components/ShiftEditor'
 import { ViolationModal } from './components/ViolationModal'
-import { exportSchedule } from './exportXlsx'
+import { exportSchedule } from './exportCsv'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -214,7 +214,7 @@ export default function App() {
   const handleExport = () => {
     if (!result) return
     exportSchedule(result, blocks, algorithm)
-      .then(() => toast.success('Exported .xlsx.'))
+      .then(() => toast.success('Exported .csv.'))
       .catch((err) => toast.error(`Export failed: ${String(err)}`))
   }
 
@@ -354,7 +354,7 @@ export default function App() {
                 onClick={handleExport}
               >
                 <Download className="h-3.5 w-3.5" />
-                Export .xlsx
+                Export .csv
               </Button>
             </div>
 
