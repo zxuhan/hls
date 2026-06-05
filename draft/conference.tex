@@ -85,7 +85,7 @@ replace this manual process.
 
 The core difficulty is that, beyond classical precedence, the
 scheduler must simultaneously satisfy single-day non-preemption,
-staffing capacity across shift windows, exclusive access to physical
+staffing capacity across working hours, exclusive access to physical
 workspace zones, exclusive access to specialised tools, and
 machine-state compatibility (each task declares a value on a small set
 of states, and concurrent tasks must agree on every state they both
@@ -269,52 +269,51 @@ machine-state compatibility.
 
 \subsubsection{Inputs}
 
-The algorithm receives a \emph{shift schedule} defining the available
-working time and a \emph{task set} $T$ defining the work to be
-scheduled. A shift schedule is an ordered sequence of working days.
-Each day contains one shift, specified by a start hour, an integer
-duration in hours, and an integer staff capacity (the number of
-engineers available throughout the shift).
+The algorithm receives the available working time as an ordered list
+of \emph{working days}, together with a \emph{task set} $T$ defining
+the work to be scheduled. Each working day offers a fixed block of
+working hours (the same on every day), staffed by an integer number of
+engineers available throughout; hours outside the block have no staff
+and admit no work.
 
 Each task $i \in T$ declares an integer duration $d_i$ in hours; a
 staff requirement $f_i$ (the number of engineers required throughout);
-a value $p_i^{(a)}$ for each of eight independent machine-state
-\emph{variables} $a$, with $p_i^{(a)} = \emptyset$ if the task leaves
-variable $a$ unset; a set of workspace zones; and an optional
-required tool, classified as either \emph{single-availability} (only
-one instance exists, so tasks requiring it cannot overlap) or
-\emph{multi-availability} (treated as effectively unlimited, imposing
-no overlap constraint). A precedence partial order over $T$ is
-supplied as a Boolean adjacency matrix encoding a directed acyclic
-graph $(T, E)$, where $E$ is the set of precedence edges.
+a value $p_i^{(a)}$ for each independent machine-state
+\emph{variable} $a$, with $p_i^{(a)} = \emptyset$ if the task leaves
+variable $a$ unset; a set of workspace zones; and at most one required
+tool, either \emph{exclusive} (only one exists, so tasks requiring it
+cannot overlap) or \emph{shared} (effectively unlimited, imposing no
+constraint). Precedence over $T$ forms a directed acyclic
+graph $(T, E)$, in which an edge $(i, j) \in E$ means task $i$ must
+finish before task $j$ may start.
 
 \subsubsection{Constraints}
 
 Every algorithm enforces six hard constraints. A schedule is feasible
-only if all six hold for every pair of placed tasks.
+only if all six hold for all placed tasks.
 
 \begin{enumerate}
   \item \textbf{Single-day non-preemption.} Each task executes as a
   single uninterrupted interval inside one day, entirely within the
-  shift hours of that day.
-  \item \textbf{Time-varying staffing capacity.} At every hour within
-  a shift, the sum of staff requirements across concurrent tasks
-  must not exceed the shift's staff capacity (one staff unit is one
-  engineer working that shift).
+  working hours of that day.
+  \item \textbf{Time-varying staffing capacity.} At every working
+  hour, the sum of staff requirements across concurrent tasks
+  must not exceed that day's staff capacity (one staff unit is one
+  engineer working that day).
   \item \textbf{Spatial exclusivity.} Each task occupies a (possibly
   empty) set of workspace zones. Two tasks whose zone sets intersect
   may not execute concurrently.
   \item \textbf{Tool exclusivity.} No two tasks requiring the same
-  single-availability tool may overlap. Tasks requiring a
-  multi-availability tool or no tool place no such constraint.
+  exclusive tool may overlap. Tasks requiring a
+  shared tool or no tool place no such constraint.
   \item \textbf{Precedence.} If task $i$ precedes task $j$, then $j$
   may not start until $i$ completes.
-  \item \textbf{Machine-state compatibility.} Each task requires the
-  machine to be in a particular state, fixing a value for some of the
-  eight state variables and leaving the rest unset. Two concurrent
-  tasks must have matching values on every state variable that both
-  fix; if either leaves a variable unset, that variable raises no
-  conflict. Any mismatch forbids overlap.
+  \item \textbf{Machine-state compatibility.} Each task fixes some
+  state variables to required values and leaves the rest unset (an
+  unset variable imposes no constraint). Two concurrent tasks must
+  have matching values on every state variable that both fix; if
+  either leaves a variable unset, that variable raises no conflict.
+  Any mismatch forbids overlap.
 \end{enumerate}
 
 These constraints model reconfiguration between sequential tasks as
@@ -340,7 +339,7 @@ A priority-rule greedy scheduler maintains the set of schedulable
 tasks (those whose predecessors have all been placed), selects one
 by a priority rule $\pi$, assigns its earliest feasible start time,
 and advances. Feasibility is checked at hourly start offsets within
-the shift hours of each day, walking days in input order until a
+the working hours of each day, walking days in input order until a
 placement satisfying all six constraints is found. Two priority rules are evaluated: \textbf{Most Total Successors
 (MTS)}, which prioritises tasks with the largest count of direct
 and indirect successors, and \textbf{Shortest Processing Time
@@ -378,16 +377,16 @@ The exact baseline uses Google OR-Tools CP-SAT~\cite{ortools}. Each
 task is modelled as an interval variable (a CP-SAT primitive with
 start, end, and duration fields) with fixed duration; its start-time
 decision variable's domain contains only the start times where the
-task fits inside the shift hours of a single day. The horizon $H$ is
-the total length of the shift schedule in hours ($H = 24 |D|$ for
-$|D|$ scheduled days); the grid spans the full 24 hours of each day,
-with non-shift hours appearing as fixed zero-capacity windows so the
+task fits inside the working hours of a single day. The horizon $H$ is
+the full length of the $|D|$ scheduled days in hours ($H = 24 |D|$);
+the grid spans the full 24 hours of each day,
+with non-working hours appearing as fixed zero-capacity windows so the
 cumulative constraint can encode them as $C(t)=0$ runs (see the
 deficit-interval construction below).
 
-Let $C(t)$ denote the instantaneous shift capacity at time $t$ (zero
-if $t$ lies outside any shift) and $C^{*} = \max_{t \in [0,H]} C(t)$
-the peak shift capacity. The staffing constraint is a cumulative
+Let $C(t)$ denote the instantaneous staff capacity at time $t$ (zero
+if $t$ lies outside working hours) and $C^{*} = \max_{t \in [0,H]} C(t)$
+the peak staff capacity. The staffing constraint is a cumulative
 constraint~\cite{vilim2015fastcumulative} on $[0,H]$ sized to $C^{*}$.
 To model time-varying capacity, the horizon is partitioned into
 maximal runs of constant $C(t)$; each run with $C(t) < C^{*}$
@@ -487,7 +486,7 @@ CST is a static, per-task measure of placement difficulty:
 where each feature is normalised by the task set's own maximum (a term with a zero maximum contributes 0). The
 three features are the per-task quantities that most directly drive
 per-step infeasibility risk: variable-rich tasks restrict
-state-compatible partners, staff-heavy tasks consume shift
+state-compatible partners, staff-heavy tasks consume staffing
 capacity, and long-duration tasks foreclose late-day slots. Tasks
 heavy on all three score near 1. The value of CST as an ordering
 signal is not theoretically determined: a static hardness boost may
@@ -542,7 +541,7 @@ algorithmic quantities reported here are unaffected by the masking.
 Four instances are evaluated, MOD\_A, MOD\_B, MOD\_C, and MOD\_D, chosen
 to span complementary difficulty profiles: a small dense module
 (MOD\_C), a large constraint-rich module (MOD\_A), a shallow-DAG
-module with a single-availability tool (MOD\_B), and a deep dense
+module with an exclusive tool (MOD\_B), and a deep dense
 precedence-driven module with minimal state activity (MOD\_D). The
 intent is not to characterise every conceivable instance but to
 exercise the algorithmic comparison against complementary regions of
@@ -586,11 +585,11 @@ carries no exclusive tools. MOD\_D is the most precedence-heavy with
 negligible state activity, isolating dense precedence from
 machine-state interaction; it carries one exclusive tool.
 
-\subsection{Shift Configuration}
+\subsection{Working-Day Configuration}
 \label{sec:shiftconfig}
 
 For consistency across instances, all are evaluated under the same
-shift configuration: a single 14-hour shift per calendar day staffed
+working-day configuration: 14 working hours per calendar day staffed
 by 6 engineers, repeated for 30 calendar days. The 30-day horizon
 is set as a safety-net upper bound, chosen generously so that the
 horizon does not artificially constrain the schedule on the
@@ -877,7 +876,7 @@ acceptable.
 CP-SAT's behaviour varies sharply with instance structure. On
 MOD\_A, MOD\_C, and MOD\_D it proves optimality in under five seconds
 despite spanning a roughly five-fold range in task count and DAG
-depth. On MOD\_B, which combines a single-availability tool
+depth. On MOD\_B, which combines an exclusive tool
 with no state activity, a moderate-depth DAG, and a heavy zone
 footprint (31 zones across 90 tasks), it exhausts the 600-second
 budget without closing the gap. The solver-internal gap of roughly 18\% is stable across the three
@@ -948,7 +947,7 @@ sufficient power is available.
 MOD\_B is the only instance whose heuristic gap is reported against
 an unproved incumbent; the conservative cross-check against CP-SAT's
 proved lower bound is in Section~\ref{sec:per-instance-results}. Its
-structural profile (heavy zone footprint, a single-availability
+structural profile (heavy zone footprint, an exclusive
 tool, minimal state activity) motivates building out more instances
 with similar features to test whether CP-SAT's difficulty generalises.
 
@@ -960,8 +959,8 @@ reality switching states consumes time; incorporating
 reconfiguration costs would likely raise the value of state
 continuity and shift the optimal $w$ upward, so the present setup
 may underestimate MSA's contribution. All instances are also
-evaluated under a fixed shift configuration (one 14-hour shift per
-day, six staff, 30-day horizon); a horizon-and-shift sweep is a
+evaluated under a fixed working-day configuration (14 working hours per
+day, six staff, 30-day horizon); a horizon-and-staffing sweep is a
 separate future-work direction.
 
 % ============================================================
