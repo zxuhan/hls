@@ -41,14 +41,14 @@ problem, arising at ASML, a manufacturer of semiconductor lithography
 machines, as a Resource-Constrained Project Scheduling Problem
 (RCPSP) with five domain-specific extensions to the classical
 formulation: single-day non-preemption, time-varying staffing capacity, 
-spatial exclusivity, tool exclusivity, and per-axis
-machine-configuration compatibility. Three algorithmic candidates are
+spatial exclusivity, tool exclusivity, and machine-state
+compatibility. Three algorithmic candidates are
 evaluated on four real industrial instances: a priority-rule greedy
 constructor with Most Total Successors (MTS) and Shortest Processing
 Time (SPT) variants, an exact CP-SAT solver,
 and a domain-enhanced greedy heuristic whose composite score
 combines a critical-path remaining term with a continuous
-machine-configuration affinity term and an optional
+machine-state affinity term and an optional
 constraint-tightness term. The recommended heuristic configuration
 attains a 6.1\% mean optimality gap to the CP-SAT incumbent across
 the four instances, well below the pre-registered 15\% mean-gap
@@ -226,12 +226,12 @@ must be completed under crew and equipment limits before it returns to
 service, have been modelled as resource-constrained project
 scheduling~\cite{megow2011turnaround}. Scheduling in
 semiconductor manufacturing has likewise drawn sustained attention, for
-both production and equipment operations, under tool-availability and
-machine-configuration constraints~\cite{monch2011semiconductor}.
+both production and equipment operations, including problems with
+auxiliary resources and cluster tools~\cite{monch2011semiconductor}.
 In these settings the planning objective is typically to minimise the
 downtime or completion window, the direct analogue of the makespan
 minimised here, which is what makes RCPSP the natural modelling frame
-for the ASML upgrade-scheduling problem.
+for the ASML upgrade scheduling problem.
 
 \subsection{Extensions and Positioning}
 
@@ -258,14 +258,14 @@ profiles rather than on a single synthetic family.
 
 \subsection{Problem Formalisation}
 
-The upgrade scheduling problem is a Resource-Constrained Project
+The ASML upgrade scheduling problem is a Resource-Constrained Project
 Scheduling Problem (RCPSP) with five domain-specific extensions to
 the classical formulation. In classical RCPSP, a set of tasks must
 be scheduled subject to precedence and renewable resource
 constraints, minimising total project duration (makespan). The
 formulation here adds single-day non-preemption, time-varying
-staffing capacity, spatial exclusivity, tool exclusivity, and per-axis
-machine-configuration compatibility.
+staffing capacity, spatial exclusivity, tool exclusivity, and
+machine-state compatibility.
 
 \subsubsection{Inputs}
 
@@ -278,9 +278,9 @@ engineers available throughout the shift).
 
 Each task $i \in T$ declares an integer duration $d_i$ in hours; a
 staff requirement $f_i$ (the number of engineers required throughout);
-a value $p_i^{(a)}$ on each of eight independent machine-configuration
-\emph{axes} $a$, with $p_i^{(a)} = \emptyset$ if the task imposes no
-requirement on axis $a$; a set of workspace zones; and an optional
+a value $p_i^{(a)}$ for each of eight independent machine-state
+\emph{variables} $a$, with $p_i^{(a)} = \emptyset$ if the task leaves
+variable $a$ unset; a set of workspace zones; and an optional
 required tool, classified as either \emph{single-availability} (only
 one instance exists, so tasks requiring it cannot overlap) or
 \emph{multi-availability} (treated as effectively unlimited, imposing
@@ -309,15 +309,16 @@ only if all six hold for every pair of placed tasks.
   multi-availability tool or no tool place no such constraint.
   \item \textbf{Precedence.} If task $i$ precedes task $j$, then $j$
   may not start until $i$ completes.
-  \item \textbf{Per-axis machine-configuration compatibility.} Each
-  task declares a value (possibly $\emptyset$) on each of the eight
-  configuration axes. For each axis independently, two concurrent
-  tasks must either share the same value or at least one must be
-  empty on that axis. A conflict on any axis forbids overlap.
+  \item \textbf{Machine-state compatibility.} Each task requires the
+  machine to be in a particular state, fixing a value for some of the
+  eight state variables and leaving the rest unset. Two concurrent
+  tasks must have matching values on every state variable that both
+  fix; if either leaves a variable unset, that variable raises no
+  conflict. Any mismatch forbids overlap.
 \end{enumerate}
 
 These constraints model reconfiguration between sequential tasks as
-instantaneous; switching costs across non-overlapping configurations
+instantaneous; switching costs across non-overlapping states
 are out of scope for the present formulation.
 
 \subsubsection{Objective}
@@ -400,10 +401,10 @@ Spatial and tool exclusivity become no-overlap
 constraints~\cite{laborie2008complete} (which forbid any two
 intervals in a group from running concurrently) over zone-grouped
 and tool-grouped intervals. Precedence is a linear inequality $t_j
-\geq t_i + d_i$ per edge. Machine-configuration constraints add a
+\geq t_i + d_i$ per edge. Machine-state constraints add a
 no-overlap between any two tasks with different declared values on a
-shared axis; on each axis, tasks declaring $\emptyset$ on that axis
-are unconstrained on that axis only.
+shared state variable; on each variable, tasks declaring $\emptyset$
+are unconstrained on that variable only.
 
 The objective is the makespan in calendar days. The solver runs
 synchronously with a user-supplied wall-clock time limit (600 seconds
@@ -417,21 +418,21 @@ Candidate C uses the same incremental construction framework as
 Candidate A but replaces the generic priority rule with a composite
 scoring function. Classical priority rules order tasks using only
 graph-structural and duration-structural information (successor
-counts, processing times). The per-axis machine-configuration
+counts, processing times). The machine-state
 constraint is a distinctive extension of the formulation, but
 Algorithm A engages with it only at the placement-feasibility check,
 never in the ordering itself. This
-can place a configuration-conflicting task at the back of a day when
-a configuration-compatible alternative was available, forcing more
+can place a state-conflicting task at the back of a day when
+a state-compatible alternative was available, forcing more
 day-breaks downstream. A domain-aware ordering signal that addresses
-the per-axis constraint therefore needs to coexist with a classical
+the machine-state constraint therefore needs to coexist with a classical
 signal in the same priority computation, and the relative weight
 between them is a tuning parameter rather than a derivable constant,
 so we expose it and characterise its effect empirically. The
 composite takes the form of two ordering signals: a critical-path
 remaining term (CPR), a duration-weighted analogue of MTS, and a
-continuous machine-configuration affinity term (MCA) that addresses
-the per-axis constraint and has no counterpart in classical RCPSP
+continuous machine-state affinity term (MSA) that addresses
+the machine-state constraint and has no counterpart in classical RCPSP
 priority rules. A third additive term, constraint tightness (CST),
 captures static schedule-state-independent task hardness and is
 included as a separate tunable signal whose contribution is
@@ -452,25 +453,25 @@ total duration of the longest path to a terminal rather than by
 successor count, so long downstream paths dominate the priority
 rather than fan-out alone.
 
-\paragraph{Machine-Configuration Affinity}
+\paragraph{Machine-State Affinity}
 Although constraint 6 only forbids concurrent conflicts, the machine
-retains a configuration between tasks. MCA rewards a candidate task
-for declaring axis values that agree with this current configuration.
-The algorithm maintains, for each axis $a$ independently, the value
+retains a state between tasks. MSA rewards a candidate task
+for declaring state values that agree with this current state.
+The algorithm maintains, for each state variable $a$ independently, the value
 $p_{\text{cur}}^{(a)}$ declared by the latest-starting placed task
 that declared a value on $a$. If no placed task has yet declared a value on $a$,
-$p_{\text{cur}}^{(a)} = \emptyset$ (``unset''). For a candidate task $i$ declaring a non-empty set of
-axes $A_i$, the MCA score is the fraction of those axes whose
+$p_{\text{cur}}^{(a)} = \emptyset$ (``unset''). For a candidate task $i$ that sets a non-empty set of
+state variables $A_i$, the MSA score is the fraction of those variables whose
 declared value $p_i^{(a)}$ either matches $p_{\text{cur}}^{(a)}$ or
-for which the axis is still unset:
+for which the variable is still unset:
 \begin{equation}
-\phi_{\text{mca}}(i) =
+\phi_{\text{msa}}(i) =
 \frac{1}{|A_i|} \sum_{a \in A_i}
 \mathbb{1}\!\left[\, p_i^{(a)} = p_{\text{cur}}^{(a)} \,\lor\,
                        p_{\text{cur}}^{(a)} = \emptyset \,\right].
 \end{equation}
-Tasks declaring no axes are configuration-neutral and score
-$\phi_{\text{mca}}(i) = 1$. This component addresses a constraint
+Tasks that set no state variables are state-neutral and score
+$\phi_{\text{msa}}(i) = 1$. This component addresses a constraint
 type with no counterpart in classical RCPSP and therefore absent
 from all standard priority rules.
 
@@ -485,8 +486,8 @@ CST is a static, per-task measure of placement difficulty:
 \end{equation}
 where each feature is normalised by the task set's own maximum (a term with a zero maximum contributes 0). The
 three features are the per-task quantities that most directly drive
-per-step infeasibility risk: axis-rich tasks restrict
-configuration-compatible partners, staff-heavy tasks consume shift
+per-step infeasibility risk: variable-rich tasks restrict
+state-compatible partners, staff-heavy tasks consume shift
 capacity, and long-duration tasks foreclose late-day slots. Tasks
 heavy on all three score near 1. The value of CST as an ordering
 signal is not theoretically determined: a static hardness boost may
@@ -498,29 +499,29 @@ than a load-bearing component, with its empirical contribution
 characterised in Section~\ref{sec:results}.
 
 \paragraph{Composite Score}
-The composite score is a convex combination of CPR and MCA,
+The composite score is a convex combination of CPR and MSA,
 optionally augmented by the CST term:
 \begin{equation}
 \text{score}(i) = (1 - w) \cdot \hat{\phi}_{\text{cpr}}(i)
-                + w \cdot \phi_{\text{mca}}(i)
+                + w \cdot \phi_{\text{msa}}(i)
                 + \gamma \cdot \phi_{\text{cst}}(i),
 \label{eq:composite}
 \end{equation}
 where $w \in [0,1]$ controls the trade-off between critical-path
-priority and configuration affinity, and $\gamma \geq 0$ controls the
-CST boost. The convex form keeps CPR and MCA on the same $[0,1]$
+priority and state affinity, and $\gamma \geq 0$ controls the
+CST boost. The convex form keeps CPR and MSA on the same $[0,1]$
 scale so that $w$ has a direct interpretation as the fractional
-emphasis placed on configuration affinity. CST is an additive term
+emphasis placed on state affinity. CST is an additive term
 rather than a third component of the convex combination so that
 varying $\gamma$ at fixed $w$ isolates the contribution of static
-hardness from the CPR/MCA trade-off (the CST ablation is reported in
+hardness from the CPR/MSA trade-off (the CST ablation is reported in
 Section~\ref{sec:cross-instance}). Scores order tasks; the
 highest-scoring task is selected at each step and assigned its
 earliest feasible start time. Ties break by ascending task
 identifier (lexicographic on the string ID).
 When $w = 0$ and $\gamma = 0$, the algorithm is pure CPR (the
 duration-weighted analogue of MTS); when $w = 1$ and $\gamma = 0$,
-it is pure configuration affinity, a signal classical priority rules
+it is pure state affinity, a signal classical priority rules
 cannot express.
 
 % ============================================================
@@ -542,7 +543,7 @@ Four instances are evaluated, MOD\_A, MOD\_B, MOD\_C, and MOD\_D, chosen
 to span complementary difficulty profiles: a small dense module
 (MOD\_C), a large constraint-rich module (MOD\_A), a shallow-DAG
 module with a single-availability tool (MOD\_B), and a deep dense
-precedence-driven module with minimal axis activity (MOD\_D). The
+precedence-driven module with minimal state activity (MOD\_D). The
 intent is not to characterise every conceivable instance but to
 exercise the algorithmic comparison against complementary regions of
 the design space rather than against repeated draws from a single
@@ -553,7 +554,7 @@ features.
 \caption{Structural features of evaluated instances.
 $|T|$: task count. $\sum d_i$: total processing work in hours.
 $d_{\max}$, $f_{\max}$: largest task by duration and staff requirement.
-$\overline{|A_i|}$: mean axes per task. Depth: longest precedence
+$\overline{|A_i|}$: mean state variables per task. Depth: longest precedence
 chain. Density: $|E|/\binom{|T|}{2}$, where $|E|$ is the precedence
 edge count.
 $Z$: zone count. $T_{\text{ex}}$: exclusive tool count.}
@@ -576,14 +577,14 @@ MOD\_D &  86 & 258 & 10 & 4 & 0.09 & 30 & 0.372 & 18 & 1 \\
 
 MOD\_A is the largest and most constraint-rich of the four instances, exercising
 every constraint type the formulation defines, with six exclusive
-tools and substantial axis activity. MOD\_B is medium-sized with a
-shallow DAG and no axis declarations, shifting difficulty toward
+tools and substantial state activity. MOD\_B is medium-sized with a
+shallow DAG and no state declarations, shifting difficulty toward
 spatial and tool exclusivity (31 zones plus one exclusive tool).
 MOD\_C is small but precedence-dense for its size, primarily
 stress-testing the precedence machinery on a short horizon; it
 carries no exclusive tools. MOD\_D is the most precedence-heavy with
-negligible axis activity, isolating dense precedence from
-configuration interaction; it carries one exclusive tool.
+negligible state activity, isolating dense precedence from
+machine-state interaction; it carries one exclusive tool.
 
 \subsection{Shift Configuration}
 \label{sec:shiftconfig}
@@ -605,7 +606,7 @@ $\gamma \in \{0, 0.5\}$; and three independent runs of CP-SAT with
 a 600-second wall-clock limit. MTS, SPT, and DEH are deterministic
 given their inputs; only CP-SAT has solver-internal variance, hence
 the three repeats apply only there. The grid spans both the convex
-CPR/MCA combination ($\gamma = 0$) and the CST-augmented composite
+CPR/MSA combination ($\gamma = 0$) and the CST-augmented composite
 ($\gamma = 0.5$), so the isolated effect of CST is recoverable as a
 paired difference per $(\text{instance}, w)$. The 600-second CP-SAT
 budget is set as a safety-net upper bound on per-instance wall-clock
@@ -877,7 +878,7 @@ CP-SAT's behaviour varies sharply with instance structure. On
 MOD\_A, MOD\_C, and MOD\_D it proves optimality in under five seconds
 despite spanning a roughly five-fold range in task count and DAG
 depth. On MOD\_B, which combines a single-availability tool
-with no axis activity, a moderate-depth DAG, and a heavy zone
+with no state activity, a moderate-depth DAG, and a heavy zone
 footprint (31 zones across 90 tasks), it exhausts the 600-second
 budget without closing the gap. The solver-internal gap of roughly 18\% is stable across the three
 CP-SAT runs rather than reducible by search randomisation: all three
@@ -894,7 +895,7 @@ Pure CPR ($w = 0$) strictly beats MTS on MOD\_A and MOD\_B and ties
 on the other two instances. The full per-$w$ grid in the
 supplementary CSVs shows that the per-instance gap is monotone
 non-decreasing in $w$ on three of the four instances, indicating that
-configuration continuity alone is a worse ordering criterion than
+state continuity alone is a worse ordering criterion than
 critical-path priority on the current set. CST is harmful at $w = 0$
 on MOD\_A (adds one day; see Table~\ref{tab:h1summary}'s
 $(w=0, \gamma=0.5)$ row) and neutral on the other three; the per-$w$
@@ -908,25 +909,24 @@ benefits remain recoverable on some instances; it does not contribute
 to the deployment-recommended configuration and is not load-bearing
 for the headline comparison.
 
-\subsection{Implications for Deployment Scenarios}
+\subsection{Practical Implications}
 
-For \emph{scenario iteration}, the median CP-SAT runtime at the
-600-second cap ranges from 0.08 s (MOD\_C) to 4.2 s (MOD\_A) on
-instances it proves optimal and saturates the cap on MOD\_B. A
-hundred-scenario sweep that takes seconds-to-minutes under CP-SAT on
-the easy instances would take well over an hour on MOD\_B if rerun
-naively, whereas DEH at $w = 0$ completes each scenario in
-under 100\,ms on every instance, so the same hundred-scenario sweep
-finishes in under 10\,s. In
-the sub-second regime relevant for an engineer running scenario
-sweeps interactively, the heuristic is therefore the only choice
-that produces a usable schedule on three of the four instances. For
-\emph{embedded deployment}, all DEH variants execute in well under
-one second with no external solver dependency, as the scenario
-requires. For
-\emph{independent verification}, the agreement between DEH at
-$w = 0$ and CP-SAT (5.3\% gap on MOD\_A, 9.1\% on MOD\_B, 0\% on
-MOD\_C, 10\% on MOD\_D) gives a usable cross-check baseline.
+The speed gap is decisive for interactive scenario iteration. The
+median CP-SAT runtime at the 600-second cap ranges from 0.08 s
+(MOD\_C) to 4.2 s (MOD\_A) on instances it proves optimal and
+saturates the cap on MOD\_B. A hundred-scenario sweep that takes
+seconds-to-minutes under CP-SAT on the easy instances would take well
+over an hour on MOD\_B if rerun naively, whereas DEH at $w = 0$
+completes each scenario in under 100\,ms on every instance, so the
+same hundred-scenario sweep finishes in under 10\,s. In the
+sub-second regime relevant for an engineer sweeping planning variants
+interactively, the heuristic is the only choice that produces a usable
+schedule on three of the four instances. Two further practical
+advantages follow from the heuristic's simplicity: it executes in well
+under one second with no external solver dependency, which suits
+embedding inside a planning tool, and its agreement with CP-SAT
+(5.3\% gap on MOD\_A, 9.1\% on MOD\_B, 0\% on MOD\_C, 10\% on MOD\_D)
+makes it a usable cross-check against an exact reference.
 
 \subsection{Limitations and Future Work}
 \label{sec:limitations}
@@ -949,17 +949,17 @@ MOD\_B is the only instance whose heuristic gap is reported against
 an unproved incumbent; the conservative cross-check against CP-SAT's
 proved lower bound is in Section~\ref{sec:per-instance-results}. Its
 structural profile (heavy zone footprint, a single-availability
-tool, minimal axis activity) motivates building out more instances
+tool, minimal state activity) motivates building out more instances
 with similar features to test whether CP-SAT's difficulty generalises.
 
 The CP-SAT budget sweep uses a coarse five-point logarithmic grid
 and a single CP-SAT run per $(\text{instance}, \tau)$ pair; a finer
-grid with multi-seed replication would tighten the curve. The MCA
+grid with multi-seed replication would tighten the curve. The MSA
 component treats machine reconfiguration as instantaneous, while in
-reality switching configurations consumes time; incorporating
-reconfiguration costs would likely raise the value of configuration
+reality switching states consumes time; incorporating
+reconfiguration costs would likely raise the value of state
 continuity and shift the optimal $w$ upward, so the present setup
-may underestimate MCA's contribution. All instances are also
+may underestimate MSA's contribution. All instances are also
 evaluated under a fixed shift configuration (one 14-hour shift per
 day, six staff, 30-day horizon); a horizon-and-shift sweep is a
 separate future-work direction.
@@ -974,8 +974,8 @@ domain-specific extensions, and evaluated three algorithmic
 candidates against it: a baseline priority-rule greedy (MTS,
 SPT), an exact CP-SAT solver (CP-SAT), and a domain-enhanced
 greedy heuristic scored by a convex combination of a critical-path
-remaining term (CPR) and a continuous machine-configuration affinity
-term (MCA), with an optional constraint-tightness term (CST) as a
+remaining term (CPR) and a continuous machine-state affinity
+term (MSA), with an optional constraint-tightness term (CST) as a
 tunable exploration (DEH).
 
 On the four instances evaluated, CP-SAT proves optimality within
@@ -1021,11 +1021,10 @@ mean gap versus MTS and a mean gap well below the 15\%
 pre-registered threshold, at sub-second cost. CP-SAT remains the
 gold-standard reference at multi-second budgets, where it matches or
 beats the heuristic on every instance evaluated. The heuristic's
-operational value covers the three deployment scenarios identified
-at the outset: it dominates the sub-second regime as the only
-candidate that returns a feasible schedule on three of the four
-instances; it removes the external-solver dependency for embedded
-deployment; and at modest gap it serves as an independent
+operational value is threefold: it dominates the sub-second regime as
+the only candidate that returns a feasible schedule on three of the
+four instances; it removes the external-solver dependency, suiting
+embedded use; and at modest gap it serves as an independent
 cross-check baseline. The verdict is preliminary at $N = 4$; further
 industrial instances, finer-grained budget sweeps, and multi-seed
 CP-SAT replication are the next refinements.
