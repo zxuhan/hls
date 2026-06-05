@@ -1,0 +1,1138 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Automated Schedule Generation for Lithography Machine
+Upgrades: A Comparative Study of Priority-Rule Greedy, CP-SAT, and a
+Domain-Enhanced Greedy Heuristic%
+\thanks{This thesis was prepared in partial fulfilment of the requirements
+for the Degree of Bachelor of Computer Science, Maastricht University.
+Supervisor(s): Guangzhi Tang, Chang Sun.}
+}
+
+\author{\IEEEauthorblockN{Xuhan Zhuang}
+\IEEEauthorblockA{\textit{Department of Advanced Computing Sciences} \\
+\textit{Faculty of Science and Engineering}\\
+\textit{Maastricht University}\\
+Maastricht, The Netherlands}
+}
+
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Planning a downtime upgrade for a complex lithography machine
+requires scheduling tens to hundreds of interdependent tasks under
+tight resource and physical constraints. We formalise one such
+problem, arising at ASML, a manufacturer of semiconductor lithography
+machines, as a Resource-Constrained Project Scheduling Problem
+(RCPSP) with five domain-specific extensions to the classical
+formulation: single-day non-preemption, time-varying staffing capacity, 
+spatial exclusivity, tool exclusivity, and per-axis
+machine-configuration compatibility. Three algorithmic candidates are
+evaluated on four real industrial instances: a priority-rule greedy
+constructor with Most Total Successors (MTS) and Shortest Processing
+Time (SPT) variants, an exact CP-SAT solver,
+and a domain-enhanced greedy heuristic whose composite score
+combines a critical-path remaining term with a continuous
+machine-configuration affinity term and an optional
+constraint-tightness term. The recommended heuristic configuration
+attains a 6.1\% mean optimality gap to the CP-SAT incumbent across
+the four instances, well below the pre-registered 15\% mean-gap
+threshold, and represents a 37\% relative reduction in mean
+optimality gap over the best classical priority rule, all at
+sub-second cost. CP-SAT proves optimality in seconds on three of the four
+instances but exhausts a 600-second budget without closing the gap
+on a fourth. A CP-SAT budget sweep reveals complementary regimes:
+in the sub-second window relevant for interactive scenario
+iteration, CP-SAT returns no feasible solution on three of the four
+instances and the heuristic is the only viable choice; from one
+second of compute upward, CP-SAT is never worse than the heuristic
+on any instance, with one-day wins on one instance at one second
+and on three instances from ten seconds.
+\end{abstract}
+
+\begin{IEEEkeywords}
+resource-constrained project scheduling, constraint programming,
+CP-SAT, domain-specific heuristics, makespan minimisation,
+lithography manufacturing
+\end{IEEEkeywords}
+
+% ============================================================
+\section{Introduction}
+
+ASML is a manufacturer of semiconductor lithography machines.
+Industrial engineers there currently schedule the machine upgrade
+process manually. The resulting schedule is referred to internally as
+a high-level sequence. The process is slow, error-prone, and does not
+scale as machines grow more complex. Schedule quality determines how
+long the machine is out of service, which in semiconductor production
+is the dominant economic cost. This paper investigates algorithms to
+replace this manual process.
+
+The core difficulty is that, beyond classical precedence, the
+scheduler must simultaneously satisfy single-day non-preemption,
+staffing capacity across shift windows, exclusive access to physical
+workspace zones, exclusive access to specialised tools, and
+machine-state compatibility (each task declares a value on a small set
+of states, and concurrent tasks must agree on every state they both
+declare). This combination positions the problem as a
+Resource-Constrained Project Scheduling Problem
+(RCPSP)~\cite{brucker1999rcpsp} with five domain-specific extensions.
+
+RCPSP is NP-hard, and decades of research have produced two broad
+solution families: exact solvers that prove optimality but whose cost
+grows sharply with instance size and constraint interaction, and
+faster heuristic constructions that trade optimality guarantees for
+speed. Section~\ref{sec:related} reviews both families and positions
+the present formulation against them.
+
+Two industrial considerations motivate studying heuristic alternatives
+alongside the exact solver. First, scalability is uncertain: as ASML
+machines grow more complex, it is not known whether an exact solver
+scales well across instances of increasing size under all five
+extension constraints. Second, speed matters in production: an engineer
+often sweeps many planning variants within a single session, so a fast
+heuristic with a small loss in solution quality can be preferable to a
+slow exact solver even when the latter returns the optimum.
+
+\subsection{Research question and hypotheses}
+\label{sec:rqs}
+
+This thesis addresses the following research question through a
+comparative algorithmic study.
+
+\smallskip
+\noindent\textbf{RQ.} \emph{To what extent can a domain-enhanced
+greedy heuristic close the optimality gap between classical
+priority-rule constructive heuristics and the CP-SAT
+constraint-programming solver in Google OR-Tools across real
+industrial instances, at sub-second computational cost?}
+\smallskip
+
+Three candidates are evaluated: (A) a baseline greedy constructor
+using standard RCPSP priority rules, (B) Google OR-Tools CP-SAT as an
+exact benchmark, and (C) a domain-enhanced greedy heuristic (DEH) whose
+composite scoring function encodes problem-specific constraints
+directly into task selection. Two falsifiable hypotheses about the
+heuristic are pre-registered, then evaluated on four real industrial
+instances drawn from distinct machine modules.
+
+\begin{itemize}
+  \item \textbf{H1.} Over the four evaluated instances, the mean
+  optimality gap of the best-configured domain-enhanced greedy
+  heuristic against the CP-SAT solver is strictly smaller than
+  that of both classical priority rules.
+  \item \textbf{H2.} Over the four evaluated instances, the mean
+  optimality gap of the best-configured domain-enhanced greedy
+  heuristic against the CP-SAT solver does not exceed
+  15\%.\footnote{Kolisch and Hartmann~\cite{kolisch2006experimental}
+  report 10--14\% mean gaps for the best classical priority rules on
+  PSPLIB; 15\% sits just above that band.}
+\end{itemize}
+
+\subsection{Paper structure}
+
+Section~\ref{sec:related} reviews background and related work.
+Section~\ref{sec:methods} formalises the problem and describes the
+three algorithmic approaches. Section~\ref{sec:experiments} describes
+the experimental design and metrics. Section~\ref{sec:results}
+presents results across the four available instances.
+Section~\ref{sec:discussion} interprets the findings and discusses
+limitations and future work. Section~\ref{sec:conclusions} concludes.
+
+% ============================================================
+\section{Background and Related Work}
+\label{sec:related}
+
+\subsection{Resource-Constrained Project Scheduling}
+
+In the classical RCPSP a set of tasks with fixed durations must be
+scheduled subject to precedence constraints and a limited supply of
+renewable resources, so as to minimise the makespan. The problem
+generalises job-shop scheduling and is NP-hard in the strong
+sense~\cite{blazewicz1983scheduling}. Standard notation, a
+classification scheme, and a catalogue of models and methods are given
+by Brucker et al.~\cite{brucker1999rcpsp}, with a book-length treatment
+in the research handbook of Demeulemeester and
+Herroelen~\cite{demeulemeester2002project}. Most empirical work in the
+field is benchmarked on PSPLIB~\cite{kolisch1997psplib}, a library of
+generated instances with known or best-known makespans, which has
+shaped how heuristics are compared. The instances studied here are real
+industrial machine modules at ASML rather than instances drawn from
+PSPLIB, so these library baselines do not apply here.
+
+\subsection{Exact Methods}
+
+Exact approaches solve the problem to proven optimality. Early work used
+dedicated branch-and-bound, such as the procedure of Stinson et
+al.~\cite{stinson1978multiple} for the multiple-resource case.
+Mixed-integer programming and constraint programming are now the
+standard exact tools. Constraint-based scheduling, surveyed by
+Baptiste et al.~\cite{Baptiste2001}, models each task as an interval
+variable and reasons over global constraints such as \emph{cumulative}
+for renewable resources and \emph{no-overlap} for disjunctive ones.
+Modern CP solvers such as IBM ILOG CP Optimizer~\cite{laborie2018ibm}
+and Google OR-Tools CP-SAT~\cite{ortools} pair these constraints with
+strong filtering and systematic search. The cumulative constraint in
+particular depends on specialised filtering, of which the edge-finding
+rule of Vil\'im~\cite{vilim2015fastcumulative} and the conditional
+time-interval reasoning of Laborie and
+Rogerie~\cite{laborie2008complete} are representative. Such solvers
+prove optimality on small and moderate instances, but their cost grows
+quickly with size and constraint interaction, which is the behaviour we
+probe directly in the budget sweep of Section~\ref{sec:budget-sweep}.
+
+\subsection{Constructive and Metaheuristic Methods}
+
+For larger or time-critical instances, heuristics remain the practical
+standard. The simplest are priority-rule methods built on a
+schedule-generation scheme: tasks are placed one at a time in an order
+set by a priority rule, with the serial and parallel schemes differing
+in how the next task is chosen. Kolisch~\cite{kolisch1996efficient}
+studies the efficiency of common priority rules, among them the
+most-total-successors and shortest-processing-time rules that we adopt
+as the two baselines of Candidate A. Metaheuristics such as genetic
+algorithms, tabu search, and simulated annealing then search the space
+of activity orderings; the experimental survey of Kolisch and
+Hartmann~\cite{kolisch2006experimental} compares many of these on
+PSPLIB and reports mean optimality gaps of roughly 10 to 14\% for the
+best priority rules. Hartmann and Briskorn~\cite{hartmann2010survey}
+survey the broader space of variants and extensions. Our heuristic
+stays in this cheap constructive class rather than the metaheuristic
+one, since the target is fast, lightweight scheduling rather than the
+longer search a metaheuristic performs.
+
+\subsection{Industrial Project Scheduling Applications}
+
+Beyond benchmark studies, RCPSP models and their extensions have been
+applied to industrial planning problems that share structural features
+with the present one. Maintenance turnaround and shutdown projects, in
+which a facility is taken offline and a large set of interdependent jobs
+must be completed under crew and equipment limits before it returns to
+service, have been modelled as resource-constrained project
+scheduling~\cite{megow2011turnaround}. Scheduling in
+semiconductor manufacturing has likewise drawn sustained attention, for
+both production and equipment operations, under tool-availability and
+machine-configuration constraints~\cite{monch2011semiconductor}.
+In these settings the planning objective is typically to minimise the
+downtime or completion window, the direct analogue of the makespan
+minimised here, which is what makes RCPSP the natural modelling frame
+for the ASML upgrade-scheduling problem.
+
+\subsection{Extensions and Positioning}
+
+Real problems rarely match the textbook RCPSP, and a large literature
+studies extensions: time-varying resource availability, multiple
+execution modes, generalised precedence, and non-renewable or
+partially renewable resources, all catalogued
+in~\cite{hartmann2010survey}. Each constraint we impose has appeared
+individually in prior work. Spatial and tool exclusivity are
+disjunctive (no-overlap) resources, time-varying staffing is a calendar
+on a renewable resource, and machine-state compatibility resembles a
+sequence-dependent setup. What we have not found in the published
+literature is this particular combination treated as a single
+formulation, in particular machine-state compatibility together with
+time-varying staffing capacity. Because instance structure drives both
+solver difficulty and heuristic quality, and because generated
+benchmarks need not reflect real structure~\cite{vanhoucke2008measurement},
+we evaluate on real modules chosen to span complementary difficulty
+profiles rather than on a single synthetic family.
+
+% ============================================================
+\section{Methods}
+\label{sec:methods}
+
+\subsection{Problem Formalisation}
+
+The upgrade scheduling problem is a Resource-Constrained Project
+Scheduling Problem (RCPSP) with five domain-specific extensions to
+the classical formulation. In classical RCPSP, a set of tasks must
+be scheduled subject to precedence and renewable resource
+constraints, minimising total project duration (makespan). The
+formulation here adds single-day non-preemption, time-varying
+staffing capacity, spatial exclusivity, tool exclusivity, and per-axis
+machine-configuration compatibility.
+
+\subsubsection{Inputs}
+
+The algorithm receives a \emph{shift schedule} defining the available
+working time and a \emph{task set} $T$ defining the work to be
+scheduled. A shift schedule is an ordered sequence of working days.
+Each day contains one shift, specified by a start hour, an integer
+duration in hours, and an integer staff capacity (the number of
+engineers available throughout the shift).
+
+Each task $i \in T$ declares an integer duration $d_i$ in hours; a
+staff requirement $f_i$ (the number of engineers required throughout);
+a value $p_i^{(a)}$ on each of eight independent machine-configuration
+\emph{axes} $a$, with $p_i^{(a)} = \emptyset$ if the task imposes no
+requirement on axis $a$; a set of workspace zones; and an optional
+required tool, classified as either \emph{single-availability} (only
+one instance exists, so tasks requiring it cannot overlap) or
+\emph{multi-availability} (treated as effectively unlimited, imposing
+no overlap constraint). A precedence partial order over $T$ is
+supplied as a Boolean adjacency matrix encoding a directed acyclic
+graph $(T, E)$, where $E$ is the set of precedence edges.
+
+\subsubsection{Constraints}
+
+Every algorithm enforces six hard constraints. A schedule is feasible
+only if all six hold for every pair of placed tasks.
+
+\begin{enumerate}
+  \item \textbf{Single-day non-preemption.} Each task executes as a
+  single uninterrupted interval inside one day, entirely within the
+  shift hours of that day.
+  \item \textbf{Time-varying staffing capacity.} At every hour within
+  a shift, the sum of staff requirements across concurrent tasks
+  must not exceed the shift's staff capacity (one staff unit is one
+  engineer working that shift).
+  \item \textbf{Spatial exclusivity.} Each task occupies a (possibly
+  empty) set of workspace zones. Two tasks whose zone sets intersect
+  may not execute concurrently.
+  \item \textbf{Tool exclusivity.} No two tasks requiring the same
+  single-availability tool may overlap. Tasks requiring a
+  multi-availability tool or no tool place no such constraint.
+  \item \textbf{Precedence.} If task $i$ precedes task $j$, then $j$
+  may not start until $i$ completes.
+  \item \textbf{Per-axis machine-configuration compatibility.} Each
+  task declares a value (possibly $\emptyset$) on each of the eight
+  configuration axes. For each axis independently, two concurrent
+  tasks must either share the same value or at least one must be
+  empty on that axis. A conflict on any axis forbids overlap.
+\end{enumerate}
+
+These constraints model reconfiguration between sequential tasks as
+instantaneous; switching costs across non-overlapping configurations
+are out of scope for the present formulation.
+
+\subsubsection{Objective}
+
+Minimise the makespan in calendar days, defined as the day index of
+the latest-completing task (the number of calendar days the machine
+is out of service). This is standard makespan minimisation for
+RCPSP, with the working-day discretisation matching how downtime is
+reported in the field.
+
+\subsection{Candidate Algorithms}
+
+All three algorithms solve the same scheduling task, with identical
+inputs and identical output structures.
+
+\subsubsection{Candidate A: Baseline Priority-Rule Greedy}
+
+A priority-rule greedy scheduler maintains the set of schedulable
+tasks (those whose predecessors have all been placed), selects one
+by a priority rule $\pi$, assigns its earliest feasible start time,
+and advances. Feasibility is checked at hourly start offsets within
+the shift hours of each day, walking days in input order until a
+placement satisfying all six constraints is found. Two priority rules are evaluated: \textbf{Most Total Successors
+(MTS)}, which prioritises tasks with the largest count of direct
+and indirect successors, and \textbf{Shortest Processing Time
+(SPT)}, which prioritises tasks with the shortest duration. With
+$\pi(i)$ as a generic priority, MTS sets $\pi(i)$ to the size of
+the successor closure of $i$ and SPT sets $\pi(i) = -d_i$, so that
+$\arg\max$ in Algorithm~\ref{alg:greedy} selects the MTS-largest or
+SPT-shortest task as required. Ties break by ascending task identifier
+(lexicographic on the string ID), ensuring deterministic output. The
+horizon is assumed long enough that every task admits a feasible
+placement; the safety-net horizon used throughout is described in
+Section~\ref{sec:shiftconfig}. The full procedure is given in
+Algorithm~\ref{alg:greedy}.
+
+\begin{algorithm}[t]
+\caption{Priority-rule greedy scheduler (Candidate A).}
+\label{alg:greedy}
+\begin{algorithmic}[1]
+\REQUIRE Task set $T$, precedence edges $E$, priority rule $\pi$
+\STATE $P \gets \emptyset$ \COMMENT{placed tasks}
+\STATE $S \gets \{i \in T : i \text{ has no predecessors}\}$
+\WHILE{$S \neq \emptyset$}
+  \STATE $i^{*} \gets \arg\max_{i \in S}\, \pi(i)$, ties broken by ascending task identifier (lexicographic on the string ID)
+  \STATE $t_{i^{*}} \gets$ earliest hourly start, in input day order, where $i^{*}$ is feasible under all six constraints
+  \STATE $P \gets P \cup \{i^{*}\}$;\quad $S \gets S \setminus \{i^{*}\}$
+  \STATE $S \gets S \cup \{j \notin P \cup S : \text{all predecessors of } j \text{ are in } P\}$
+\ENDWHILE
+\RETURN start times $\{t_i\}_{i \in P}$
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Candidate B: Constraint Programming with CP-SAT}
+
+The exact baseline uses Google OR-Tools CP-SAT~\cite{ortools}. Each
+task is modelled as an interval variable (a CP-SAT primitive with
+start, end, and duration fields) with fixed duration; its start-time
+decision variable's domain contains only the start times where the
+task fits inside the shift hours of a single day. The horizon $H$ is
+the total length of the shift schedule in hours ($H = 24 |D|$ for
+$|D|$ scheduled days); the grid spans the full 24 hours of each day,
+with non-shift hours appearing as fixed zero-capacity windows so the
+cumulative constraint can encode them as $C(t)=0$ runs (see the
+deficit-interval construction below).
+
+Let $C(t)$ denote the instantaneous shift capacity at time $t$ (zero
+if $t$ lies outside any shift) and $C^{*} = \max_{t \in [0,H]} C(t)$
+the peak shift capacity. The staffing constraint is a cumulative
+constraint~\cite{vilim2015fastcumulative} on $[0,H]$ sized to $C^{*}$.
+To model time-varying capacity, the horizon is partitioned into
+maximal runs of constant $C(t)$; each run with $C(t) < C^{*}$
+contributes a fixed-position \emph{deficit interval} of demand
+$C^{*} - C(t)$ to the cumulative. The
+cumulative therefore sees a constant-capacity profile while still
+enforcing $\sum_i f_i \cdot \mathbb{1}[t \in [t_i, t_i + d_i)] \leq
+C(t)$.
+
+Spatial and tool exclusivity become no-overlap
+constraints~\cite{laborie2008complete} (which forbid any two
+intervals in a group from running concurrently) over zone-grouped
+and tool-grouped intervals. Precedence is a linear inequality $t_j
+\geq t_i + d_i$ per edge. Machine-configuration constraints add a
+no-overlap between any two tasks with different declared values on a
+shared axis; on each axis, tasks declaring $\emptyset$ on that axis
+are unconstrained on that axis only.
+
+The objective is the makespan in calendar days. The solver runs
+synchronously with a user-supplied wall-clock time limit (600 seconds
+in our experiments); if it terminates inside the limit the solution
+is provably optimal, otherwise the best feasible solution is returned
+along with a lower bound.
+
+\subsubsection{Candidate C: Domain-Enhanced Greedy Heuristic (DEH)}
+
+Candidate C uses the same incremental construction framework as
+Candidate A but replaces the generic priority rule with a composite
+scoring function. Classical priority rules order tasks using only
+graph-structural and duration-structural information (successor
+counts, processing times). The per-axis machine-configuration
+constraint is a distinctive extension of the formulation, but
+Algorithm A engages with it only at the placement-feasibility check,
+never in the ordering itself. This
+can place a configuration-conflicting task at the back of a day when
+a configuration-compatible alternative was available, forcing more
+day-breaks downstream. A domain-aware ordering signal that addresses
+the per-axis constraint therefore needs to coexist with a classical
+signal in the same priority computation, and the relative weight
+between them is a tuning parameter rather than a derivable constant,
+so we expose it and characterise its effect empirically. The
+composite takes the form of two ordering signals: a critical-path
+remaining term (CPR), a duration-weighted analogue of MTS, and a
+continuous machine-configuration affinity term (MCA) that addresses
+the per-axis constraint and has no counterpart in classical RCPSP
+priority rules. A third additive term, constraint tightness (CST),
+captures static schedule-state-independent task hardness and is
+included as a separate tunable signal whose contribution is
+characterised empirically rather than assumed.
+
+\paragraph{Critical Path Remaining}
+Before scheduling, the longest-path distance from every task to a
+terminal node of the precedence graph is computed, measured in
+cumulative processing duration:
+\begin{equation}
+\phi_{\text{cpr}}(i) = d_i + \max_{(i,j) \in E} \phi_{\text{cpr}}(j),
+\end{equation}
+with $\phi_{\text{cpr}}(i) = d_i$ for terminal tasks. We use the
+normalised form $\hat{\phi}_{\text{cpr}}(i) = \phi_{\text{cpr}}(i) /
+\max_j \phi_{\text{cpr}}(j) \in [0,1]$ in the composite score below.
+CPR is a duration-weighted analogue of MTS: it weights tasks by the
+total duration of the longest path to a terminal rather than by
+successor count, so long downstream paths dominate the priority
+rather than fan-out alone.
+
+\paragraph{Machine-Configuration Affinity}
+Although constraint 6 only forbids concurrent conflicts, the machine
+retains a configuration between tasks. MCA rewards a candidate task
+for declaring axis values that agree with this current configuration.
+The algorithm maintains, for each axis $a$ independently, the value
+$p_{\text{cur}}^{(a)}$ declared by the latest-starting placed task
+that declared a value on $a$. If no placed task has yet declared a value on $a$,
+$p_{\text{cur}}^{(a)} = \emptyset$ (``unset''). For a candidate task $i$ declaring a non-empty set of
+axes $A_i$, the MCA score is the fraction of those axes whose
+declared value $p_i^{(a)}$ either matches $p_{\text{cur}}^{(a)}$ or
+for which the axis is still unset:
+\begin{equation}
+\phi_{\text{mca}}(i) =
+\frac{1}{|A_i|} \sum_{a \in A_i}
+\mathbb{1}\!\left[\, p_i^{(a)} = p_{\text{cur}}^{(a)} \,\lor\,
+                       p_{\text{cur}}^{(a)} = \emptyset \,\right].
+\end{equation}
+Tasks declaring no axes are configuration-neutral and score
+$\phi_{\text{mca}}(i) = 1$. This component addresses a constraint
+type with no counterpart in classical RCPSP and therefore absent
+from all standard priority rules.
+
+\paragraph{Constraint Tightness}
+CST is a static, per-task measure of placement difficulty:
+\begin{equation}
+\phi_{\text{cst}}(i) = \frac{1}{3} \left(
+  \frac{|A_i|}{\max_j |A_j|} +
+  \frac{f_i}{\max_j f_j} +
+  \frac{d_i}{\max_j d_j}
+\right),
+\end{equation}
+where each feature is normalised by the task set's own maximum (a term with a zero maximum contributes 0). The
+three features are the per-task quantities that most directly drive
+per-step infeasibility risk: axis-rich tasks restrict
+configuration-compatible partners, staff-heavy tasks consume shift
+capacity, and long-duration tasks foreclose late-day slots. Tasks
+heavy on all three score near 1. The value of CST as an ordering
+signal is not theoretically determined: a static hardness boost may
+pull structurally hard tasks toward the front of the schedulable
+pool before their placement windows fragment, or it may overrule
+CPR where the CPR-implied ordering was already correct.
+CST is therefore introduced as a tunable exploration parameter rather
+than a load-bearing component, with its empirical contribution
+characterised in Section~\ref{sec:results}.
+
+\paragraph{Composite Score}
+The composite score is a convex combination of CPR and MCA,
+optionally augmented by the CST term:
+\begin{equation}
+\text{score}(i) = (1 - w) \cdot \hat{\phi}_{\text{cpr}}(i)
+                + w \cdot \phi_{\text{mca}}(i)
+                + \gamma \cdot \phi_{\text{cst}}(i),
+\label{eq:composite}
+\end{equation}
+where $w \in [0,1]$ controls the trade-off between critical-path
+priority and configuration affinity, and $\gamma \geq 0$ controls the
+CST boost. The convex form keeps CPR and MCA on the same $[0,1]$
+scale so that $w$ has a direct interpretation as the fractional
+emphasis placed on configuration affinity. CST is an additive term
+rather than a third component of the convex combination so that
+varying $\gamma$ at fixed $w$ isolates the contribution of static
+hardness from the CPR/MCA trade-off (the CST ablation is reported in
+Section~\ref{sec:cross-instance}). Scores order tasks; the
+highest-scoring task is selected at each step and assigned its
+earliest feasible start time. Ties break by ascending task
+identifier (lexicographic on the string ID).
+When $w = 0$ and $\gamma = 0$, the algorithm is pure CPR (the
+duration-weighted analogue of MTS); when $w = 1$ and $\gamma = 0$,
+it is pure configuration affinity, a signal classical priority rules
+cannot express.
+
+% ============================================================
+\section{Experimental Setup}
+\label{sec:experiments}
+
+\subsection{Instances}
+\label{sec:instances}
+
+The study uses real industrial RCPSP instances drawn from distinct
+machine modules. Each instance is supplied as a three-table dataset
+(task properties, a precedence matrix, and a spatial-zone matrix)
+used internally by the industrial partner. Task
+identifiers, tool names, and zone labels are masked at source before
+the data leaves the company; numeric attributes are unmasked, so the
+algorithmic quantities reported here are unaffected by the masking.
+
+Four instances are evaluated, MOD\_A, MOD\_B, MOD\_C, and MOD\_D, chosen
+to span complementary difficulty profiles: a small dense module
+(MOD\_C), a large constraint-rich module (MOD\_A), a shallow-DAG
+module with a single-availability tool (MOD\_B), and a deep dense
+precedence-driven module with minimal axis activity (MOD\_D). The
+intent is not to characterise every conceivable instance but to
+exercise the algorithmic comparison against complementary regions of
+the design space rather than against repeated draws from a single
+profile. Table~\ref{tab:instances} summarises their structural
+features.
+
+\begin{table}[ht]
+\caption{Structural features of evaluated instances.
+$|T|$: task count. $\sum d_i$: total processing work in hours.
+$d_{\max}$, $f_{\max}$: largest task by duration and staff requirement.
+$\overline{|A_i|}$: mean axes per task. Depth: longest precedence
+chain. Density: $|E|/\binom{|T|}{2}$, where $|E|$ is the precedence
+edge count.
+$Z$: zone count. $T_{\text{ex}}$: exclusive tool count.}
+\label{tab:instances}
+\centering
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+Inst.\ & $|T|$ & $\sum d_i$ & $d_{\max}$ & $f_{\max}$ & $\overline{|A_i|}$ & Depth & Density & $Z$ & $T_{\text{ex}}$ \\
+       &       & (h)        & (h)        & (staff)    &                    &       &         &     &                 \\
+\midrule
+MOD\_A & 100 & 458 & 10 & 5 & 0.91 & 29 & 0.043 & 27 & 6 \\
+MOD\_B &  90 & 300 & 10 & 5 & 0.00 & 11 & 0.035 & 31 & 1 \\
+MOD\_C &  22 &  86 & 10 & 4 & 0.64 &  7 & 0.359 & 11 & 0 \\
+MOD\_D &  86 & 258 & 10 & 4 & 0.09 & 30 & 0.372 & 18 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+MOD\_A is the largest and most constraint-rich of the four instances, exercising
+every constraint type the formulation defines, with six exclusive
+tools and substantial axis activity. MOD\_B is medium-sized with a
+shallow DAG and no axis declarations, shifting difficulty toward
+spatial and tool exclusivity (31 zones plus one exclusive tool).
+MOD\_C is small but precedence-dense for its size, primarily
+stress-testing the precedence machinery on a short horizon; it
+carries no exclusive tools. MOD\_D is the most precedence-heavy with
+negligible axis activity, isolating dense precedence from
+configuration interaction; it carries one exclusive tool.
+
+\subsection{Shift Configuration}
+\label{sec:shiftconfig}
+
+For consistency across instances, all are evaluated under the same
+shift configuration: a single 14-hour shift per calendar day staffed
+by 6 engineers, repeated for 30 calendar days. The 30-day horizon
+is set as a safety-net upper bound, chosen generously so that the
+horizon does not artificially constrain the schedule on the
+instances at hand.
+
+\subsection{Methodology and Metrics}
+\label{sec:methodology}
+
+For each instance, fifteen scheduling runs are conducted: one each
+of MTS and SPT; ten DEH runs covering the $5 \times 2$ grid of
+weights $w \in \{0, 0.25, 0.5, 0.75, 1.0\}$ and CST settings
+$\gamma \in \{0, 0.5\}$; and three independent runs of CP-SAT with
+a 600-second wall-clock limit. MTS, SPT, and DEH are deterministic
+given their inputs; only CP-SAT has solver-internal variance, hence
+the three repeats apply only there. The grid spans both the convex
+CPR/MCA combination ($\gamma = 0$) and the CST-augmented composite
+($\gamma = 0.5$), so the isolated effect of CST is recoverable as a
+paired difference per $(\text{instance}, w)$. The 600-second CP-SAT
+budget is set as a safety-net upper bound on per-instance wall-clock
+time, chosen generously so that any instance the solver fails to
+close within this budget is treated as time-limited.
+
+For each run we record success (a Boolean flag for whether the
+algorithm produced a feasible schedule, with failures not retried);
+makespan in calendar days; algorithm-internal runtime in milliseconds,
+excluding I/O, validation, and result formatting; best bound and
+proved status for CP-SAT only; and the optimality gap, computed
+after all runs complete, as $(m_{\text{algo}} - m^{*}) / m^{*}$, where $m^{*}$ is
+CP-SAT's best feasible makespan on the instance (the proved optimum
+where CP-SAT terminates within the 600\,s budget, the best incumbent
+at the cap otherwise). On any instance where CP-SAT does not prove
+optimality within the budget, DEH's gap against CP-SAT's proved
+lower bound is also reported as a conservative cross-check
+(Section~\ref{sec:per-instance-results}).
+
+To characterise the speed--quality trade-off directly, a CP-SAT
+budget sweep is conducted alongside the headline 600-second runs:
+one additional CP-SAT run per $(\text{instance}, \tau)$ pair across
+the five-point logarithmic grid $\tau \in \{0.1, 1, 10, 60, 600\}$
+seconds, independent of the three headline runs at $\tau = 600$\,s.
+The heuristic baseline is not re-run, since DEH at the recommended
+$(w=0, \gamma=0)$ configuration completes in under 100 ms on every
+instance, so its existing measurement covers every budget at or above
+its construction cost.
+
+The CST ablation is also evaluated with a paired Wilcoxon
+signed-rank test on the 20 per-$(\text{instance}, w)$ makespan deltas
+($\gamma = 0.5$ minus $\gamma = 0$), with zero deltas discarded per
+the standard Wilcoxon convention.
+
+\subsection{Hypothesis Evaluation}
+
+Throughout, ``best-configured DEH'' denotes the configuration with
+the lowest mean optimality gap across the four evaluated instances,
+applied identically to every instance; on the present set this is
+$(w, \gamma) = (0, 0)$. The choice is at the cross-instance grain
+rather than per-instance, but it remains an in-sample selection
+across the four instances. A stronger pre-registration would have
+fixed the configuration before any evaluation runs and is left for
+the larger instance set identified as future work.
+
+H1 is evaluated by comparing the mean optimality gap of
+best-configured DEH across the four instances against the
+mean gaps of MTS and SPT. H2 is evaluated by checking that
+this mean gap does not exceed 15\%. The CST design ablation
+($\gamma = 0.5$ vs $\gamma = 0$ at fixed $w$, paired per instance)
+is reported alongside the H1/H2 verdicts.
+
+\subsection{Implementation}
+
+All algorithms are implemented in pure Python and depend only on the
+\texttt{ortools} library (CP-SAT, version $\geq 9.8$, $<10$) for the
+CP-SAT solver. Experiments are run on an Apple M1 Pro with 16 GB of
+RAM under macOS 26.3 with Python 3.13.3; all runtimes are wall-clock
+medians, excluding I/O. Source code, the pinned dependency specification, raw
+per-instance result CSVs, and aggregation scripts are provided as
+supplementary material.
+
+% ============================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Per-Instance Results}
+\label{sec:per-instance-results}
+
+Table~\ref{tab:per-instance} reports the headline numbers per
+instance: MTS, SPT, the lowest-gap DEH configuration on
+that instance (with winning $(w, \gamma)$ noted), and the median
+CP-SAT result over three independent runs. The full $5 \times 2$
+DEH grid is included in the supplementary CSVs.
+
+\begin{table}[ht]
+\caption{Per-instance headline results. ``DEH best'' is the
+lowest-gap DEH configuration on that instance; on every instance
+this is $(w=0, \gamma=0)$, the deployment-recommended configuration.
+On MOD\_B the CP-SAT entry is its best feasible at the 600-second
+cap, not a proved optimum. The three independent CP-SAT runs return
+identical makespans and lower bounds on every instance; reported
+runtimes are the median.}
+\label{tab:per-instance}
+\centering
+\renewcommand{\arraystretch}{1.1}
+\setlength{\tabcolsep}{3pt}
+\footnotesize
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Inst.\ & Algorithm                        & $m$ (d) & Gap (\%) & Runtime (ms) \\
+\midrule
+MOD\_A & MTS                            & 21 & 10.5 & 5    \\
+       & SPT                            & 26 & 36.8 & 3    \\
+       & DEH $(w{=}0, \gamma{=}0)$      & 20 &  5.3 & 54   \\
+       & CP-SAT (med.\ of 3)             & 19 &  0.0 & 4235 \\
+\midrule
+MOD\_B & MTS                            & 13 & 18.2 & 5      \\
+       & SPT                            & 14 & 27.3 & 4      \\
+       & DEH $(w{=}0, \gamma{=}0)$      & 12 &  9.1 & 81     \\
+       & CP-SAT (med.\ of 3, capped)     & 11 &  0.0 & 600406 \\
+\midrule
+MOD\_C & MTS                            &  5 &  0.0 & 0    \\
+       & SPT                            &  7 & 40.0 & 0    \\
+       & DEH $(w{=}0, \gamma{=}0)$      &  5 &  0.0 & 2    \\
+       & CP-SAT (med.\ of 3)             &  5 &  0.0 & 76   \\
+\midrule
+MOD\_D & MTS                            & 11 & 10.0 & 5    \\
+       & SPT                            & 12 & 20.0 & 3    \\
+       & DEH $(w{=}0, \gamma{=}0)$      & 11 & 10.0 & 22   \\
+       & CP-SAT (med.\ of 3)             & 10 &  0.0 & 1059 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On every instance the
+critical-path-only DEH configuration ($w = 0$, $\gamma = 0$)
+is the lowest-gap heuristic. SPT consistently degrades,
+reproducing the textbook SPT pathology: short tasks placed early
+fragment the remaining capacity. DEH at $w = 0$ strictly
+beats MTS on two instances (MOD\_A: 20 vs 21 days; MOD\_B: 12 vs
+13 days) and ties on the other two. CP-SAT proves optimality in
+seconds on MOD\_A, MOD\_C, and MOD\_D, but exhausts its 600-second
+budget on MOD\_B with incumbent 11 and a proved lower bound of 9
+across all three runs.
+
+On MOD\_B, where CP-SAT's incumbent (11) is not proved optimal,
+DEH's gap against CP-SAT's proved lower bound ($\text{LB} = 9$) is
+$(12 - 9)/9 = 33.3\%$. This is a conservative cross-check rather
+than the H2 test (which is pre-registered against the incumbent);
+substituting the LB for MOD\_B's $m^{*}$ raises the cross-instance
+mean gap from 6.1\% to 12.2\%, still below the 15\% mean-gap
+threshold.
+
+\subsection{Cross-Instance Summary}
+\label{sec:cross-instance}
+
+Table~\ref{tab:h1summary} aggregates the result set into
+hypothesis-evaluation form. Gaps are computed against the per-instance
+CP-SAT incumbent (proved optimum on MOD\_A, MOD\_C, MOD\_D; best
+feasible at the cap on MOD\_B). Within-15\% reports the fraction of
+instances whose individual gap is at most 15\%, a per-instance
+strengthening of H2's mean constraint.
+
+\begin{table}[ht]
+\caption{Cross-instance hypothesis summary. DEH configurations
+at intermediate $w$ are omitted for space and reported in the
+supplementary CSVs.}
+\label{tab:h1summary}
+\centering
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Configuration                         & Mean gap (\%) & Median gap (\%) & Within 15\% \\
+\midrule
+MTS                                 &  9.7 & 10.3 & 0.75 \\
+SPT                                 & 31.0 & 32.0 & 0.00 \\
+DEH $(w{=}0, \gamma{=}0)$           &  6.1 &  7.2 & 1.00 \\
+DEH $(w{=}0, \gamma{=}0.5)$         &  7.4 &  9.6 & 1.00 \\
+CP-SAT                               &  0.0 &  0.0 & 1.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{H1 (supported)}
+The lowest-mean-gap DEH configuration is $w = 0, \gamma = 0$
+at 6.1\% mean gap, strictly smaller than MTS at 9.7\% and SPT
+at 31.0\%. This represents a 37\% relative reduction in mean gap
+versus the best classical priority rule. Beyond the H1 mean
+comparison, DEH at $(w=0, \gamma=0)$ also does not degrade against
+MTS or SPT on any individual instance, a stronger property than
+H1 itself requires. It strictly beats MTS on MOD\_A
+(5.3\% vs 10.5\%) and MOD\_B (9.1\% vs 18.2\%), ties MTS on MOD\_C
+and MOD\_D, and strictly beats SPT on every instance.
+
+\paragraph{H2 (supported)}
+H2 (mean $\leq 15\%$) is met at 6.1\%. As a stronger sanity check,
+every individual instance also lies within the threshold
+(5.3\%, 9.1\%, 0\%, 10\%).
+
+\paragraph{Ablation: the constraint-tightness term}
+Across the 20 paired comparisons of $\gamma = 0.5$ versus $\gamma = 0$
+at fixed $w$, the split is 3 wins, 11 ties, and 6 losses for CST.
+$\gamma = 0.5$ is equal-or-better in 14 of 20 paired comparisons,
+but strict losses outnumber strict wins two-to-one. At the winning
+$w = 0$ setting, $\gamma = 0.5$ strictly degrades MOD\_A by one day
+(5.3\% to 10.5\% gap) and ties on the other three instances, so the
+mean-gap delta of $\gamma = 0.5$ over $\gamma = 0$ at the recommended
+$w$ is $+1.3$ percentage points. On the 9 non-zero pairs the paired
+Wilcoxon signed-rank test gives $W = 13.5$, $p = 0.25$ (two-sided,
+with zeros discarded; SciPy \texttt{wilcoxon},
+\texttt{zero\_method='wilcox'}), so the median paired difference is
+not significantly different from zero at conventional thresholds. Interpretation of these numbers is deferred to
+Section~\ref{sec:discussion}.
+
+\subsection{CP-SAT Time-Budget Sweep}
+\label{sec:budget-sweep}
+
+The headline comparison contrasts CP-SAT at its 600-second cap against
+the heuristic at $\leq 100$ ms. This is the quality-ceiling comparison
+and is appropriate for the H1 verdicts; it is not the comparison most
+relevant to the sub-second-budget regime motivated in
+Section~\ref{sec:rqs}. Table~\ref{tab:budget-sweep} reports the
+CP-SAT budget sweep described in Section~\ref{sec:methodology}.
+
+\begin{table*}[!t]
+\caption{CP-SAT makespan (days) across the budget grid
+$\tau \in \{0.1, 1, 10, 60, 600\}$ s, versus the heuristic reference
+at $\leq 100$ ms. Each cell shows $m$ / status, where status is
+\texttt{opt} (CP-SAT proved optimality), \texttt{inc} (feasible
+incumbent without proof), or \texttt{none} (no feasible solution
+within budget).}
+\label{tab:budget-sweep}
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+       & \multicolumn{5}{c}{CP-SAT at budget $\tau$ (s)}
+       & Heuristic ($\leq$0.1 s) & \\
+\cmidrule(lr){2-6}
+Inst.\ & $\tau{=}0.1$ & $\tau{=}1$ & $\tau{=}10$ & $\tau{=}60$ & $\tau{=}600$
+       & DEH $(w{=}0, \gamma{=}0)$ & Best-known $m^{*}$ \\
+\midrule
+MOD\_A & --/none & 19/inc & 19/opt & 19/opt & 19/opt
+       & 20 & 19 (proved) \\
+MOD\_B & --/none & 12/inc & 11/inc & 11/inc & 11/inc
+       & 12 & 11 (LB 9, unproved) \\
+MOD\_C & 5/opt   & 5/opt  & 5/opt  & 5/opt  & 5/opt
+       & 5  & 5 (proved) \\
+MOD\_D & --/none & 11/inc & 10/opt & 10/opt & 10/opt
+       & 11 & 10 (proved) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The sweep separates a sub-second, single-second, and multi-second
+regime. At $\tau = 0.1$ s, CP-SAT returns no feasible solution on
+MOD\_A, MOD\_B, and MOD\_D; only MOD\_C is small enough that CP-SAT
+proves optimality within this budget. The heuristic returns a
+feasible schedule on every instance at this budget, so in the
+sub-second regime the heuristic is the only choice that yields a
+usable answer on three of the four instances. At $\tau = 1$ s, CP-SAT
+matches the heuristic on MOD\_B, MOD\_C, and MOD\_D (at 12, 5, and
+11 days respectively) and beats it by one day on MOD\_A (19 vs 20).
+MOD\_C is proved optimal at this budget; the other three remain
+unproved incumbents, with CP-SAT internal gaps at $\tau = 1$ s,
+$(\text{UB}-\text{LB})/\text{UB}$, of 10.5\%, 58.3\%, and 27.3\% on
+MOD\_A, MOD\_B, and MOD\_D respectively. The MOD\_B value is
+consistent with MOD\_B remaining hard for CP-SAT at any budget: even
+at the 600-s cap the internal gap is still
+$(11-9)/11 = 18.2\%$ (Section~\ref{sec:per-instance-results}).
+At $\tau \geq 10$ s, CP-SAT reaches its best incumbent on every instance,
+beating the heuristic by one day on MOD\_A, MOD\_B, and MOD\_D (and
+tying on MOD\_C). The heuristic is therefore not uniformly best: it dominates in the
+sub-second regime, while CP-SAT weakly dominates from one second of
+compute upward (one strict one-day win on MOD\_A, three ties at
+$\tau = 1$\,s; strict one-day wins on three of four instances at
+$\tau \geq 10$\,s) when an unproved-but-high-quality incumbent is
+acceptable.
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Cross-Instance Interpretation}
+
+CP-SAT's behaviour varies sharply with instance structure. On
+MOD\_A, MOD\_C, and MOD\_D it proves optimality in under five seconds
+despite spanning a roughly five-fold range in task count and DAG
+depth. On MOD\_B, which combines a single-availability tool
+with no axis activity, a moderate-depth DAG, and a heavy zone
+footprint (31 zones across 90 tasks), it exhausts the 600-second
+budget without closing the gap. The solver-internal gap of roughly 18\% is stable across the three
+CP-SAT runs rather than reducible by search randomisation: all three
+runs converge to the same incumbent (11 days) and lower bound (9
+days). The contrast directly motivates the heuristic
+comparison. Where CP-SAT proves optimality cheaply, the heuristic
+gap is the entire question. Where CP-SAT cannot prove optimality
+within an industrially feasible budget, an inexpensive constructive
+heuristic with a small known gap to incumbent is operationally
+useful even without an exact reference.
+
+Within DEH, the gap shape across $w$ at $\gamma = 0$ is informative.
+Pure CPR ($w = 0$) strictly beats MTS on MOD\_A and MOD\_B and ties
+on the other two instances. The full per-$w$ grid in the
+supplementary CSVs shows that the per-instance gap is monotone
+non-decreasing in $w$ on three of the four instances, indicating that
+configuration continuity alone is a worse ordering criterion than
+critical-path priority on the current set. CST is harmful at $w = 0$
+on MOD\_A (adds one day; see Table~\ref{tab:h1summary}'s
+$(w=0, \gamma=0.5)$ row) and neutral on the other three; the per-$w$
+ablation pattern at $\gamma = 0.5$ in the supplementary CSVs is mixed
+(helpful on MOD\_D at intermediate $w$, uniformly harmful on MOD\_B,
+mixed on MOD\_A), and these intermediate-$w$ gains do not offset
+MOD\_A's loss at the recommended $w = 0$. CST is therefore harmful
+at the recommended configuration rather than merely neutral, and is
+retained as a per-instance tunable signal because intermediate-$w$
+benefits remain recoverable on some instances; it does not contribute
+to the deployment-recommended configuration and is not load-bearing
+for the headline comparison.
+
+\subsection{Implications for Deployment Scenarios}
+
+For \emph{scenario iteration}, the median CP-SAT runtime at the
+600-second cap ranges from 0.08 s (MOD\_C) to 4.2 s (MOD\_A) on
+instances it proves optimal and saturates the cap on MOD\_B. A
+hundred-scenario sweep that takes seconds-to-minutes under CP-SAT on
+the easy instances would take well over an hour on MOD\_B if rerun
+naively, whereas DEH at $w = 0$ completes each scenario in
+under 100\,ms on every instance, so the same hundred-scenario sweep
+finishes in under 10\,s. In
+the sub-second regime relevant for an engineer running scenario
+sweeps interactively, the heuristic is therefore the only choice
+that produces a usable schedule on three of the four instances. For
+\emph{embedded deployment}, all DEH variants execute in well under
+one second with no external solver dependency, as the scenario
+requires. For
+\emph{independent verification}, the agreement between DEH at
+$w = 0$ and CP-SAT (5.3\% gap on MOD\_A, 9.1\% on MOD\_B, 0\% on
+MOD\_C, 10\% on MOD\_D) gives a usable cross-check baseline.
+
+\subsection{Limitations and Future Work}
+\label{sec:limitations}
+
+The strongest limitation is sample size. With $N = 4$ at the time of
+writing, the cross-instance verdicts (H1, H2) should be read as
+preliminary directional evidence rather than statistical
+generalisation; adequate coverage of the RCPSP design space requires
+systematic sampling across multiple structural parameter
+axes~\cite{vanhoucke2008measurement}, which the present four
+instances do not yet provide. Each evaluated instance is also one
+module of one machine, while in deployment a lithography machine
+carries multiple upgradeable modules and ASML operates many machines.
+Additional modules from the ASML instance pipeline are expected to
+become available over time, opening both per-machine and cross-machine
+scaling; H1 and H2 can be revisited under non-parametric tests once
+sufficient power is available.
+
+MOD\_B is the only instance whose heuristic gap is reported against
+an unproved incumbent; the conservative cross-check against CP-SAT's
+proved lower bound is in Section~\ref{sec:per-instance-results}. Its
+structural profile (heavy zone footprint, a single-availability
+tool, minimal axis activity) motivates building out more instances
+with similar features to test whether CP-SAT's difficulty generalises.
+
+The CP-SAT budget sweep uses a coarse five-point logarithmic grid
+and a single CP-SAT run per $(\text{instance}, \tau)$ pair; a finer
+grid with multi-seed replication would tighten the curve. The MCA
+component treats machine reconfiguration as instantaneous, while in
+reality switching configurations consumes time; incorporating
+reconfiguration costs would likely raise the value of configuration
+continuity and shift the optimal $w$ upward, so the present setup
+may underestimate MCA's contribution. All instances are also
+evaluated under a fixed shift configuration (one 14-hour shift per
+day, six staff, 30-day horizon); a horizon-and-shift sweep is a
+separate future-work direction.
+
+% ============================================================
+\section{Conclusions}
+\label{sec:conclusions}
+
+This thesis formalised the upgrade-scheduling problem encountered at
+ASML as a Resource-Constrained Project Scheduling Problem with five
+domain-specific extensions, and evaluated three algorithmic
+candidates against it: a baseline priority-rule greedy (MTS,
+SPT), an exact CP-SAT solver (CP-SAT), and a domain-enhanced
+greedy heuristic scored by a convex combination of a critical-path
+remaining term (CPR) and a continuous machine-configuration affinity
+term (MCA), with an optional constraint-tightness term (CST) as a
+tunable exploration (DEH).
+
+On the four instances evaluated, CP-SAT proves optimality within
+seconds on MOD\_A, MOD\_C, and MOD\_D under a 600-second budget but
+exhausts that budget on MOD\_B with a non-zero solver-internal gap
+(incumbent 11, lower bound 9). The recommended heuristic
+configuration, DEH at $w = 0, \gamma = 0$, attains a mean
+gap of 6.1\% against the CP-SAT incumbent, strictly below MTS
+(9.7\%) and SPT (31.0\%), well below the pre-registered 15\%
+mean-gap threshold, and a 37\% relative reduction in mean gap
+versus the best classical priority rule. Pre-registered
+hypotheses H1 and H2 are therefore supported. The CST design ablation
+is conditionally beneficial: $\gamma = 0.5$ is equal-or-better than
+$\gamma = 0$ in 14 of 20 paired comparisons, but strict losses (6)
+outnumber strict wins (3) two-to-one, and at the recommended $w = 0$
+setting $\gamma = 0.5$ strictly degrades the mean gap by 1.3
+percentage points relative to $\gamma = 0$ (driven by a one-day loss
+on MOD\_A). CST is retained as a per-instance tunable signal but is
+not part of the recommended deployment configuration and is not
+load-bearing for the headline comparison.
+
+The CP-SAT budget sweep characterises the speed--quality
+trade-off and reveals three regimes. At 0.1 s per instance, CP-SAT
+returns no feasible solution on three of the four instances
+(MOD\_A, MOD\_B, MOD\_D); only the smallest instance (MOD\_C) is
+solved at this budget. The heuristic returns a feasible schedule on
+every instance at this budget, so in the sub-second regime the
+heuristic is the only choice that yields a usable answer on three
+of the four instances. At one second, CP-SAT matches the heuristic
+on MOD\_B, MOD\_C, and MOD\_D and beats it by one day on MOD\_A;
+MOD\_C is proved optimal at this budget while the other three
+remain unproved incumbents.
+From ten seconds onward, CP-SAT beats the heuristic by one day on
+three of the four instances and ties on the fourth. The heuristic is
+therefore not uniformly best: it dominates in the sub-second regime,
+while CP-SAT weakly dominates from one second of compute upward when
+an unproved-but-high-quality incumbent is acceptable.
+
+A domain-enhanced greedy heuristic
+can close a substantial fraction of the residual gap that classical
+priority rules leave against CP-SAT, a 37\% relative reduction in
+mean gap versus MTS and a mean gap well below the 15\%
+pre-registered threshold, at sub-second cost. CP-SAT remains the
+gold-standard reference at multi-second budgets, where it matches or
+beats the heuristic on every instance evaluated. The heuristic's
+operational value covers the three deployment scenarios identified
+at the outset: it dominates the sub-second regime as the only
+candidate that returns a feasible schedule on three of the four
+instances; it removes the external-solver dependency for embedded
+deployment; and at modest gap it serves as an independent
+cross-check baseline. The verdict is preliminary at $N = 4$; further
+industrial instances, finer-grained budget sweeps, and multi-seed
+CP-SAT replication are the next refinements.
+
+% ============================================================
+\begin{thebibliography}{00}
+
+\bibitem{blazewicz1983scheduling}
+J.~Blazewicz, J.~K.~Lenstra, and A.~H.~G.~Rinnooy~Kan,
+``Scheduling subject to resource constraints: classification and
+complexity,''
+\textit{Discrete Applied Mathematics}, vol.~5, no.~1, pp.~11--24, 1983.
+
+\bibitem{kolisch1997psplib}
+R.~Kolisch and A.~Sprecher,
+``PSPLIB: a project scheduling problem library,''
+\textit{European Journal of Operational Research}, vol.~96, no.~1,
+pp.~205--216, 1997.
+
+\bibitem{laborie2018ibm}
+P.~Laborie, J.~Rogerie, P.~Shaw, and P.~Vil\'im,
+``IBM ILOG CP optimizer for scheduling,''
+\textit{Constraints}, vol.~23, no.~2, pp.~210--250, 2018.
+
+\bibitem{Baptiste2001}
+P.~Baptiste, C.~Le~Pape, and W.~Nuijten,
+\textit{Constraint-Based Scheduling: Applying Constraint Programming
+to Scheduling Problems}.
+Springer, 2001.
+
+\bibitem{hartmann2010survey}
+S.~Hartmann and D.~Briskorn,
+``A survey of variants and extensions of the resource-constrained
+project scheduling problem,''
+\textit{European Journal of Operational Research}, vol.~207, no.~1,
+pp.~1--14, 2010.
+
+\bibitem{kolisch1996efficient}
+R.~Kolisch,
+``Efficient priority rules for the resource-constrained project
+scheduling problem,''
+\textit{Journal of Operations Management}, vol.~14, no.~3,
+pp.~179--192, 1996.
+
+\bibitem{ortools}
+Google OR-Tools,
+``OR-Tools: open source software for combinatorial optimization,''
+Google Developers, 2023. [Online].
+Available: https://developers.google.com/optimization
+
+\bibitem{brucker1999rcpsp}
+P.~Brucker, A.~Drexl, R.~M\"ohring, K.~Neumann, and E.~Pesch,
+``Resource-constrained project scheduling: notation, classification,
+models, and methods,''
+\textit{European Journal of Operational Research}, vol.~112, no.~1,
+pp.~3--41, 1999.
+
+\bibitem{kolisch2006experimental}
+R.~Kolisch and S.~Hartmann,
+``Experimental investigation of heuristics for resource-constrained
+project scheduling: an update,''
+\textit{European Journal of Operational Research}, vol.~174, no.~1,
+pp.~23--37, 2006.
+
+\bibitem{stinson1978multiple}
+J.~P.~Stinson, E.~W.~Davis, and B.~M.~Khumawala,
+``Multiple resource-constrained scheduling using branch and bound,''
+\textit{AIIE Transactions}, vol.~10, no.~3, pp.~252--259, 1978.
+
+\bibitem{vanhoucke2008measurement}
+M.~Vanhoucke, J.~Coelho, D.~Debels, B.~Maenhout, and L.~V.~Tavares,
+``An evaluation of the adequacy of project network generators with
+systematically sampled networks,''
+\textit{European Journal of Operational Research}, vol.~187, no.~2,
+pp.~511--524, 2008.
+
+\bibitem{laborie2008complete}
+P.~Laborie and J.~Rogerie,
+``Reasoning with conditional time-intervals,''
+in \textit{Proc.\ 21st Int.\ FLAIRS Conference}, 2008, pp.~555--560.
+
+\bibitem{vilim2015fastcumulative}
+P.~Vil\'im,
+``Timetable edge finding filtering algorithm for discrete cumulative
+resources,''
+in \textit{Integration of AI and OR Techniques in Constraint
+Programming (CPAIOR)}, 2015, pp.~230--245.
+
+\bibitem{demeulemeester2002project}
+E.~Demeulemeester and W.~Herroelen,
+\textit{Project Scheduling: A Research Handbook}.
+Kluwer Academic, 2002.
+
+\bibitem{megow2011turnaround}
+N.~Megow, R.~H.~M\"ohring, and J.~Schulz,
+``Decision support and optimization in shutdown and turnaround
+scheduling,''
+\textit{INFORMS Journal on Computing}, vol.~23, no.~2, pp.~189--204,
+2011.
+
+\bibitem{monch2011semiconductor}
+L.~M\"onch, J.~W.~Fowler, S.~Dauz\`ere-P\'er\`es, S.~J.~Mason, and
+O.~Rose,
+``A survey of problems, solution techniques, and future challenges in
+scheduling semiconductor manufacturing operations,''
+\textit{Journal of Scheduling}, vol.~14, no.~6, pp.~583--599, 2011.
+
+\end{thebibliography}
+
+\end{document}
