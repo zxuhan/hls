@@ -484,24 +484,20 @@ classical priority rules cannot express.
 \subsection{Instances}
 \label{sec:instances}
 
-The study uses real industrial RCPSP instances drawn from distinct
+The study uses real industrial instances at ASML drawn from distinct
 machine modules. Each instance is supplied as a three-table dataset
 (task properties, a precedence matrix, and a spatial-zone matrix)
-used internally by the industrial partner. Task
-identifiers, tool names, and zone labels are masked at source before
-the data leaves the company; numeric attributes are unmasked, so the
-algorithmic quantities reported here are unaffected by the masking.
+used internally by ASML.
 
-Four instances are evaluated, MOD\_A, MOD\_B, MOD\_C, and MOD\_D, chosen
-to span complementary difficulty profiles: a small dense module
-(MOD\_C), a large constraint-rich module (MOD\_A), a shallow-DAG
-module with an exclusive tool (MOD\_B), and a deep dense
-precedence-driven module with minimal state activity (MOD\_D). The
-intent is not to characterise every conceivable instance but to
-exercise the algorithmic comparison against complementary regions of
-the design space rather than against repeated draws from a single
-profile. Table~\ref{tab:instances} summarises their structural
-features.
+Four instances are evaluated, MOD\_A through MOD\_D, chosen to span
+complementary regions of the design space rather than repeated draws
+from a single profile. MOD\_A is the largest and most constraint-rich,
+exercising every constraint type the formulation defines; MOD\_B has a
+shallow DAG and no state activity, so its difficulty lies in spatial
+and tool exclusivity; MOD\_C is small but precedence-dense for its
+size; and MOD\_D is the most precedence-heavy with negligible state
+activity, isolating dense precedence from machine-state interaction.
+Table~\ref{tab:instances} summarises their structural features.
 
 \begin{table}[ht]
 \caption{Structural features of evaluated instances.
@@ -527,14 +523,6 @@ MOD\_D &  86 & 258 & 10 & 4 & 0.09 & 30 & 0.372 & 18 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-The four instances span distinct structural profiles. MOD\_A is the
-largest and most constraint-rich, exercising every constraint type the
-formulation defines. MOD\_B has a shallow DAG and no state activity, so
-its difficulty lies in spatial and tool exclusivity. MOD\_C is small
-but precedence-dense for its size. MOD\_D is the most precedence-heavy
-with negligible state activity, isolating dense precedence from
-machine-state interaction.
 
 \subsection{Working-Day Configuration}
 \label{sec:shiftconfig}
@@ -573,11 +561,6 @@ across the grid $\tau \in \{0.1, 1, 10, 60, 600\}$ seconds. The
 heuristic is not re-run, since DEH at $(w=0, \gamma=0)$ completes in
 under 100 ms on every instance and so already covers every budget at
 or above its construction cost.
-
-The CST ablation is also evaluated with a paired Wilcoxon
-signed-rank test on the 20 per-$(\text{instance}, w)$ makespan deltas
-($\gamma = 0.5$ minus $\gamma = 0$), with zero deltas discarded per
-the standard Wilcoxon convention.
 
 \subsection{Hypothesis Evaluation}
 
@@ -712,9 +695,7 @@ $\gamma = 0$ at fixed $w$, the split is 3 wins, 11 ties, and 6 losses
 for CST: equal-or-better in 14 of 20, but with strict losses
 outnumbering strict wins two-to-one. At the recommended $w = 0$,
 $\gamma = 0.5$ degrades MOD\_A by one day and ties elsewhere, a
-mean-gap delta of $+1.3$ percentage points. On the 9 non-zero pairs a
-paired Wilcoxon signed-rank test gives $W = 13.5$, $p = 0.25$, so the
-median paired difference is not significant. Interpretation is
+mean-gap delta of $+1.3$ percentage points. Interpretation is
 deferred to Section~\ref{sec:discussion}.
 
 \subsection{CP-SAT Time-Budget Sweep}
@@ -823,8 +804,9 @@ coverage of the RCPSP design space requires systematic sampling
 across structural parameter axes~\cite{vanhoucke2008measurement},
 which four instances do not provide. Each instance is also one module
 of one machine, whereas a deployed machine carries several upgradeable
-modules; H1 and H2 can be revisited under non-parametric tests once
-more instances are available.
+modules; H1, H2, and the CST design ablation can be revisited under
+properly powered non-parametric tests, such as a paired Wilcoxon
+signed-rank test on the CST deltas, once more instances are available.
 
 MOD\_B is the only instance whose heuristic gap is reported against
 an unproved incumbent (cross-checked against the proved lower bound in
