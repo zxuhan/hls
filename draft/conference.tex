@@ -137,6 +137,20 @@ instances drawn from distinct machine modules.
   PSPLIB; 15\% sits just above that band.}
 \end{itemize}
 
+This study makes four contributions. First, it formalises the ASML
+high-level-sequence problem as an RCPSP with five domain-specific
+extensions, including a machine-state compatibility constraint not
+present in standard formulations. Second, it evaluates three
+candidates (two classical priority rules, an exact CP-SAT model, and a
+domain-enhanced greedy heuristic) under identical inputs on four real
+industrial instances. Third, it characterises the speed--quality
+trade-off through a CP-SAT time-budget sweep, identifying the
+sub-second regime in which the heuristic is the only candidate that
+returns a feasible schedule. Fourth, it reports transparently which
+signals drive the result: a critical-path ordering closes most of the
+gap, while the additional domain-specific terms prove at best
+conditional on the current instances.
+
 \subsection{Paper structure}
 
 Section~\ref{sec:related} reviews background and related work.
@@ -856,9 +870,23 @@ matches or beats it on every instance and remains the gold-standard
 reference. The heuristic's operational value is therefore to own the
 sub-second regime, to remove the external-solver dependency for
 embedded use, and to serve as a cheap cross-check against an exact
-reference. The verdict is preliminary at $N = 4$; further industrial
-instances, finer budget sweeps, and multi-seed CP-SAT replication are
-the next refinements.
+reference. A broader lesson is that domain-specific ordering signals help only
+when the objective rewards them: makespan alone does not, so the
+critical path dominates, while an objective that prices machine
+reconfiguration would change that calculus.
+
+The verdict is preliminary at $N = 4$, and several directions follow.
+The most immediate is scale: a larger, structurally sampled instance
+set would move H1 and H2 from directional evidence toward statistical
+generalisation, and would support predicting from structural features
+alone when the heuristic is safe to trust. The reconfiguration-cost
+objective just noted is the natural setting in which to revisit the
+machine-state term, which earns nothing under the present
+instantaneous-reconfiguration assumption. Finally, deployment spans
+several modules per machine and many machines, opening per-machine and
+cross-machine scheduling beyond the single-module instances studied
+here; finer budget sweeps and multi-seed CP-SAT replication would
+tighten the empirical picture throughout.
 
 % ============================================================
 \begin{thebibliography}{00}
