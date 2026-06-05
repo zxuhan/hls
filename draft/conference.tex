@@ -134,22 +134,21 @@ instances drawn from distinct machine modules.
   \item \textbf{H2.} Over the four evaluated instances, the mean
   optimality gap of the best-configured domain-enhanced greedy
   heuristic against the CP-SAT solver does not exceed
-  15\%.\footnote{Kolisch and Hartmann~\cite{kolisch2006experimental}
-  report 10--14\% mean gaps for the best classical priority rules on
-  PSPLIB; 15\% sits just above that band.}
+  15\%.\footnote{The 15\% threshold is a pre-registered,
+  industrially-motivated design choice, fixed before the multi-instance
+  runs.}
 \end{itemize}
 
 This study makes four contributions. First, it formalises the ASML
-high-level-sequence problem as an RCPSP with five domain-specific
+machine upgrade scheduling problem as an RCPSP with five domain-specific
 extensions, including a machine-state compatibility constraint not
 present in standard formulations. Second, it evaluates three
 candidates (two classical priority rules, an exact CP-SAT model, and a
 domain-enhanced greedy heuristic) under identical inputs on four real
-industrial instances. Third, it characterises the speed--quality
+industrial instances. Third, it characterises the speed and quality
 trade-off through a CP-SAT time-budget sweep, identifying the
 sub-second regime in which the heuristic is the only candidate that
-returns a feasible schedule. Fourth, it reports transparently which
-signals drive the result: a critical-path ordering closes most of the
+returns a feasible schedule. Fourth, it shows that a critical-path ordering closes most of the
 gap, while the additional domain-specific terms prove at best
 conditional on the current instances.
 
@@ -175,7 +174,7 @@ renewable resources, so as to minimise the makespan. The problem
 generalises job-shop scheduling and is NP-hard in the strong
 sense~\cite{blazewicz1983scheduling}. Standard notation, a
 classification scheme, and a catalogue of models and methods are given
-by Brucker et al.~\cite{brucker1999rcpsp}, with a book-length treatment
+by Brucker et al.~\cite{brucker1999rcpsp}, with a comprehensive treatment
 in the research handbook of Demeulemeester and
 Herroelen~\cite{demeulemeester2002project}. Most empirical work in the
 field is benchmarked on PSPLIB~\cite{kolisch1997psplib}, a library of
@@ -198,7 +197,7 @@ Modern CP solvers such as IBM ILOG CP Optimizer~\cite{laborie2018ibm}
 and Google OR-Tools CP-SAT~\cite{ortools} pair these constraints with
 strong filtering and systematic search. The cumulative constraint in
 particular depends on specialised filtering, of which the edge-finding
-rule of Vil\'im~\cite{vilim2015fastcumulative} and the conditional
+rule of Vil\'im~\cite{vilim2011fastcumulative} and the conditional
 time-interval reasoning of Laborie and
 Rogerie~\cite{laborie2008complete} are representative. Such solvers
 prove optimality on small and moderate instances, but their cost grows
@@ -213,13 +212,13 @@ schedule-generation scheme: tasks are placed one at a time in an order
 set by a priority rule, with the serial and parallel schemes differing
 in how the next task is chosen. Kolisch~\cite{kolisch1996efficient}
 studies the efficiency of common priority rules, among them the
-most-total-successors and shortest-processing-time rules that we adopt
-as the two baselines of Candidate A. Metaheuristics such as genetic
+most-total-successors rule we adopt as one baseline of Candidate A;
+the other, shortest processing time, is a standard duration-based
+dispatching rule used as a simple contrast baseline. Metaheuristics such as genetic
 algorithms, tabu search, and simulated annealing then search the space
 of activity orderings; the experimental survey of Kolisch and
-Hartmann~\cite{kolisch2006experimental} compares many of these on
-PSPLIB and reports mean optimality gaps of roughly 10 to 14\% for the
-best priority rules. Hartmann and Briskorn~\cite{hartmann2010survey}
+Hartmann~\cite{kolisch2006experimental} benchmarks many of these on
+PSPLIB, where genetic algorithms are among the strongest performers. Hartmann and Briskorn~\cite{hartmann2010survey}
 survey the broader space of variants and extensions. Our heuristic
 stays in this cheap constructive class rather than the metaheuristic
 one, since the target is fast, lightweight scheduling rather than the
@@ -282,8 +281,8 @@ The algorithm receives the available working time as an ordered list
 of \emph{working days}, together with a \emph{task set} $T$ defining
 the work to be scheduled. Each working day offers a fixed block of
 working hours (the same on every day), staffed by an integer number of
-engineers available throughout; hours outside the block have no staff
-and admit no work.
+available engineers throughout; hours outside the block have no staff
+and no work is assigned.
 
 Each task $i \in T$ declares an integer duration $d_i$ in hours; a
 staff requirement $f_i$ (the number of engineers required throughout);
@@ -326,8 +325,7 @@ only if all six hold for all placed tasks.
 \end{enumerate}
 
 These constraints model reconfiguration between sequential tasks as
-instantaneous; switching costs across non-overlapping states
-are out of scope for the present formulation.
+instantaneous, assuming no switching cost across machine states.
 
 \subsubsection{Objective}
 
@@ -387,7 +385,7 @@ start, end, and duration fields) with fixed duration; its start time
 may only fall where the task fits inside the working hours of a single
 day. Let $C(t)$ be the available staff at time $t$, equal to the day's
 staff count during working hours and zero outside them. The staffing
-limit is a cumulative constraint~\cite{vilim2015fastcumulative}
+limit is a cumulative constraint~\cite{vilim2011fastcumulative}
 enforcing $\sum_i f_i \cdot \mathbb{1}[t \in [t_i, t_i + d_i)] \leq
 C(t)$ across the scheduling horizon.
 
@@ -621,7 +619,7 @@ On MOD\_B the CP-SAT entry is the incumbent at the 600-second cap,
 not a proved optimum.}
 \label{tab:per-instance}
 \centering
-\renewcommand{\arraystretch}{1.1}
+\renewcommand{\arraystretch}{1.15}
 \setlength{\tabcolsep}{3pt}
 \footnotesize
 \begin{tabular}{@{}llrrr@{}}
@@ -846,7 +844,7 @@ headline comparison.
 \subsection{Practical Implications}
 
 The speed gap is decisive for interactive scenario iteration. CP-SAT
-saturates the 600-second cap on MOD\_B, so a hundred-scenario sweep
+hits the 600-second cap on MOD\_B, so a hundred-scenario sweep
 would take well over an hour there, whereas DEH completes each
 scenario in under 100\,ms on every instance and finishes the same
 sweep in under 10\,s. In this sub-second regime the heuristic is the
@@ -920,7 +918,7 @@ sub-second regime, to remove the external-solver dependency for
 embedded use, and to serve as a cheap cross-check against an exact
 reference. A broader lesson is that domain-specific ordering signals help only
 when the objective rewards them. Makespan alone does not help, so the
-critical path dominates, while an objective that adds machine
+critical path dominates, while an objective that adds machine state
 reconfiguration cost would change that calculus.
 
 The verdict is preliminary at $N = 4$, and several directions follow.
@@ -1013,12 +1011,12 @@ P.~Laborie and J.~Rogerie,
 ``Reasoning with conditional time-intervals,''
 in \textit{Proc.\ 21st Int.\ FLAIRS Conference}, 2008, pp.~555--560.
 
-\bibitem{vilim2015fastcumulative}
+\bibitem{vilim2011fastcumulative}
 P.~Vil\'im,
 ``Timetable edge finding filtering algorithm for discrete cumulative
 resources,''
 in \textit{Integration of AI and OR Techniques in Constraint
-Programming (CPAIOR)}, 2015, pp.~230--245.
+Programming (CPAIOR)}, 2011, pp.~230--245.
 
 \bibitem{demeulemeester2002project}
 E.~Demeulemeester and W.~Herroelen,
