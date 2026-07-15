@@ -72,7 +72,9 @@ public class EnhancedGreedyScheduler implements Scheduler {
             Block bestBlock = null;
             double bestScore = -1;
             int bestStartTime = -1;
+            boolean bestPinned = false;
             boolean anySchedulable = false;
+            Block blockedExample = null;
             for (String id : remaining) {
                 if (planner.isGrouped(id)) continue;
                 Block block = blockMap.get(id);
@@ -83,12 +85,35 @@ public class EnhancedGreedyScheduler implements Scheduler {
                 anySchedulable = true;
                 int minStart = engine.getEarliestPredecessorEnd(block);
                 int startTime = engine.findEarliestValidStart(block, minStart);
-                if (startTime < 0) continue;
+                if (startTime < 0) {
+                    // Keep one blocked block for diagnostics, preferring a pinned one:
+                    // a pin is both the likeliest cause and the most actionable to report.
+                    if (blockedExample == null
+                            || (!isPinned(blockedExample) && isPinned(block))) {
+                        blockedExample = block;
+                    }
+                    continue;
+                }
 
                 double score = (1.0 - weight) * cprNorm.getOrDefault(block.id(), 0.0)
                         + weight * computeLookBackOpa(block, currentAxisValue);
-                if (score > bestScore
-                        || (score == bestScore && (bestBlock == null || block.id().compareTo(bestBlock.id()) < 0))) {
+                // A calendar-pinned block can only occupy one day (and possibly one
+                // exact hour), so it outranks any composite score: unpinned work
+                // placed first can consume the capacity it needs and strand it, and
+                // this constructor cannot backtrack. Inert on ODM-free instances.
+                boolean pinned = isPinned(block);
+                boolean better;
+                if (bestBlock == null) {
+                    better = true;
+                } else if (pinned != bestPinned) {
+                    better = pinned;
+                } else if (score != bestScore) {
+                    better = score > bestScore;
+                } else {
+                    better = block.id().compareTo(bestBlock.id()) < 0;
+                }
+                if (better) {
+                    bestPinned = pinned;
                     bestScore = score;
                     bestBlock = block;
                     bestStartTime = startTime;
@@ -126,17 +151,29 @@ public class EnhancedGreedyScheduler implements Scheduler {
             }
 
             if (bestBlock == null && bestGroup == null) {
-                String msg = (!anySchedulable && !anyGroupReady)
-                        ? "No schedulable blocks found — possible missing predecessor outside block set "
-                          + "or a sequence group blocked by a cyclic external dependency"
-                        : "No feasible schedule found: remaining blocks cannot fit in any available window";
+                String msg;
+                if (!anySchedulable && !anyGroupReady) {
+                    msg = "No schedulable blocks found — possible missing predecessor outside block set "
+                            + "or a sequence group blocked by a cyclic external dependency";
+                } else if (blockedExample != null) {
+                    String pin = blockedExample.odm().describePin();
+                    msg = "No feasible schedule found: block " + blockedExample.id()
+                            + " (duration " + blockedExample.durationHalfHours()
+                            + " half-hours) cannot fit "
+                            + (pin == null ? "in any available window"
+                                           : "under its ODM pin (" + pin + ")");
+                } else {
+                    msg = "No feasible schedule found: remaining blocks cannot fit in any available window";
+                }
                 return new ScheduleResult(false, msg, 0, List.of(),
                         System.currentTimeMillis() - startMs, null, null);
             }
 
-            // Choose single vs group (tie → single, reproducing the baseline when no groups exist).
+            // Choose single vs group (tie → single, reproducing the baseline when no
+            // groups exist). A pinned single pre-empts the group for the same reason
+            // it pre-empts a higher-scoring unpinned block.
             boolean placeGroup = bestBlock == null
-                    || (bestGroup != null && bestGroupScore > bestScore);
+                    || (bestGroup != null && !bestPinned && bestGroupScore > bestScore);
 
             if (!placeGroup) {
                 engine.placeBlock(bestBlock, bestStartTime);
@@ -169,6 +206,10 @@ public class EnhancedGreedyScheduler implements Scheduler {
      * placed block has set the axis yet). Orientation-neutral blocks (no
      * axes declared) score 1.
      */
+    private static boolean isPinned(Block b) {
+        return b.odm().hasDayPin() || b.odm().hasHourPin();
+    }
+
     /**
      * Record {@code block}'s axis values as the machine's current orientation,
      * per axis, iff this placement is the most recent start seen for that axis.

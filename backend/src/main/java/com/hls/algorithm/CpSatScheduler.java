@@ -54,13 +54,10 @@ public class CpSatScheduler implements Scheduler {
             }
 
             if (validStarts.isEmpty()) {
-                String where = (odm.hasDayPin() || odm.hasHourPin())
-                        ? " under its ODM pin ("
-                            + (odm.hasDayPin() ? "Day " + odm.pinnedDay() : "")
-                            + (odm.hasDayPin() && odm.hasHourPin() ? ", " : "")
-                            + (odm.hasHourPin() ? "Hour_Start " + odm.pinnedStartHour() : "")
-                            + ")"
-                        : " in any single-day shift window";
+                String pin = odm.describePin();
+                String where = pin == null
+                        ? " in any single-day shift window"
+                        : " under its ODM pin (" + pin + ")";
                 return new ScheduleResult(false,
                         "No feasible schedule found: block " + block.id() +
                                 " (duration " + block.durationHalfHours() +

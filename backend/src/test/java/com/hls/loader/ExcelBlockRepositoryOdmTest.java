@@ -51,6 +51,29 @@ class ExcelBlockRepositoryOdmTest {
         assertThat(b2.odm().noParallel()).isFalse();
     }
 
+    /**
+     * Real sheets spell the hour-pin header both ways. An unmatched header is
+     * silently skipped, which would drop every hour pin without warning, so
+     * both spellings must resolve to the same column.
+     */
+    @Test
+    void acceptsPluralHoursStartHeader(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("odm_plural.xlsx");
+        try (Workbook wb = new XSSFWorkbook()) {
+            writeBlocks(wb);
+            writeTdm(wb);
+            writePdm(wb);
+            Sheet odm = wb.createSheet("ODM");
+            header(odm, "ODM", "SG", "Day", "Hours_Start", "Parallelism");
+            row(odm, 1, "B1", "", "3", "11", "");
+            write(wb, file);
+        }
+
+        Block b1 = new ExcelBlockRepository(file.toString()).getBlockById("B1");
+        assertThat(b1.odm().pinnedDay()).isEqualTo(3);
+        assertThat(b1.odm().pinnedStartHour()).isEqualTo(11);
+    }
+
     @Test
     void rejectsInvalidParallelism(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("odm_bad.xlsx");

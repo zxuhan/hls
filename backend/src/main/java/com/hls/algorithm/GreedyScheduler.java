@@ -56,13 +56,12 @@ public class GreedyScheduler implements Scheduler {
             }
 
             // Sort by priority (stable — preserves the original tie-break order).
-            if (ascending) {
-                schedulable.sort(Comparator.comparingInt(b -> priorityValues.getOrDefault(b.id(), 0)));
-            } else {
-                schedulable.sort((a, b) -> Integer.compare(
-                        priorityValues.getOrDefault(b.id(), 0),
-                        priorityValues.getOrDefault(a.id(), 0)));
-            }
+            Comparator<Block> byPriority = ascending
+                    ? Comparator.comparingInt((Block b) -> priorityValues.getOrDefault(b.id(), 0))
+                    : (a, b) -> Integer.compare(
+                            priorityValues.getOrDefault(b.id(), 0),
+                            priorityValues.getOrDefault(a.id(), 0));
+            schedulable.sort(PIN_FIRST.thenComparing(byPriority));
             Block topSingle = schedulable.isEmpty() ? null : schedulable.get(0);
 
             // Ready sequence groups, represented by their best-priority member.
@@ -94,6 +93,8 @@ public class GreedyScheduler implements Scheduler {
                 placeGroup = true;
             } else if (bestGroup == null) {
                 placeGroup = false;
+            } else if (isPinned(topSingle)) {
+                placeGroup = false;
             } else {
                 int singleKey = priorityValues.getOrDefault(topSingle.id(), 0);
                 placeGroup = strictlyBetter(bestGroupKey, singleKey, ascending);
@@ -103,10 +104,13 @@ public class GreedyScheduler implements Scheduler {
                 int minStart = engine.getEarliestPredecessorEnd(topSingle);
                 int startTime = engine.findEarliestValidStart(topSingle, minStart);
                 if (startTime < 0) {
+                    String pin = topSingle.odm().describePin();
                     return new ScheduleResult(false,
                             "No feasible schedule found: block " + topSingle.id() +
                                     " (duration " + topSingle.durationHalfHours() +
-                                    " half-hours) cannot fit in any available window",
+                                    " half-hours) cannot fit " +
+                                    (pin == null ? "in any available window"
+                                                 : "under its ODM pin (" + pin + ")"),
                             0, List.of(), System.currentTimeMillis() - startMs, null, null);
                 }
                 engine.placeBlock(topSingle, startTime);
@@ -136,6 +140,21 @@ public class GreedyScheduler implements Scheduler {
         long runtimeMs = System.currentTimeMillis() - startMs;
 
         return new ScheduleResult(true, null, makespan, result, runtimeMs, null, null);
+    }
+
+    /**
+     * A calendar-pinned block can only ever occupy one day (and possibly one
+     * exact hour), so unpinned work placed first can consume the capacity it
+     * needs and strand it — a failure the non-backtracking constructor cannot
+     * undo. Ordering pinned blocks ahead of unpinned ones costs nothing when no
+     * pins exist (every block scores 1, and the sort is stable), so the
+     * baseline ordering is unchanged for ODM-free instances.
+     */
+    private static final Comparator<Block> PIN_FIRST =
+            Comparator.comparingInt((Block b) -> isPinned(b) ? 0 : 1);
+
+    private static boolean isPinned(Block b) {
+        return b.odm().hasDayPin() || b.odm().hasHourPin();
     }
 
     /** Representative priority for a group: the best member value under the

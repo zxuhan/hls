@@ -44,4 +44,18 @@ public record OdmConstraints(
     public boolean hasHourPin() {
         return pinnedStartHour != null;
     }
+
+    /**
+     * Human-readable rendering of the calendar pin for error messages, e.g.
+     * {@code "Day 3, Hour_Start 11"}, or {@code null} when the block is
+     * unpinned. Callers use the null case to fall back to a generic message.
+     */
+    public String describePin() {
+        if (!hasDayPin() && !hasHourPin()) return null;
+        StringBuilder sb = new StringBuilder();
+        if (hasDayPin()) sb.append("Day ").append(pinnedDay);
+        if (hasDayPin() && hasHourPin()) sb.append(", ");
+        if (hasHourPin()) sb.append("Hour_Start ").append(pinnedStartHour);
+        return sb.toString();
+    }
 }

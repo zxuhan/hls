@@ -59,6 +59,14 @@ public class ExcelBlockRepository implements BlockRepository {
     private static final String COL_ODM_HOUR_START = "Hour_Start";
     private static final String COL_ODM_PARALLELISM = "Parallelism";
 
+    /**
+     * Accepted spellings for the hour-pin header (compared trimmed + lowercased).
+     * Sheets in the field use both the singular and plural form, and a header
+     * that fails to match is worse than a hard error: the column is silently
+     * skipped and every hour pin in the sheet is dropped without warning.
+     */
+    private static final Set<String> COL_ODM_HOUR_START_ALIASES = Set.of("hour_start", "hours_start");
+
     // ── Required Blocks-sheet headers ──────────────────────────────────────
     private static final String COL_HL_BLOCK = "HL Block";
     private static final String COL_HRS = "HRS";
@@ -733,7 +741,7 @@ public class ExcelBlockRepository implements BlockRepository {
             String key = name.trim().toLowerCase(Locale.ROOT);
             if (sgCol == null && key.equals(COL_ODM_SG.toLowerCase(Locale.ROOT))) sgCol = c;
             else if (dayCol == null && key.equals(COL_ODM_DAY.toLowerCase(Locale.ROOT))) dayCol = c;
-            else if (hourCol == null && key.equals(COL_ODM_HOUR_START.toLowerCase(Locale.ROOT))) hourCol = c;
+            else if (hourCol == null && COL_ODM_HOUR_START_ALIASES.contains(key)) hourCol = c;
             else if (parCol == null && key.equals(COL_ODM_PARALLELISM.toLowerCase(Locale.ROOT))) parCol = c;
         }
 
