@@ -272,8 +272,19 @@ public class CpSatScheduler implements Scheduler {
                     (int) Math.round(bestBound), gap);
         }
 
-        return new ScheduleResult(false,
-                "No feasible schedule found by CP-SAT solver within time limit",
+        // INFEASIBLE and UNKNOWN demand opposite responses — fix the instance vs.
+        // grant more time — so they must not share a message.
+        String reason;
+        if (status == CpSolverStatus.INFEASIBLE) {
+            reason = "CP-SAT proved that no feasible schedule exists: the constraints "
+                    + "contradict each other, so a longer time limit cannot help";
+        } else if (status == CpSolverStatus.MODEL_INVALID) {
+            reason = "CP-SAT rejected the model as invalid";
+        } else {
+            reason = "CP-SAT found no feasible schedule within the " + timeLimitSeconds
+                    + "s time limit; the instance may still be feasible — retry with a longer limit";
+        }
+        return new ScheduleResult(false, "No feasible schedule found: " + reason,
                 0, List.of(), runtimeMs, null, null);
     }
 
