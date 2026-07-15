@@ -58,6 +58,7 @@ public class EnhancedGreedyScheduler implements Scheduler {
                 .collect(Collectors.toMap(Block::id, b -> b));
 
         GreedyPlacementEngine engine = new GreedyPlacementEngine(shiftSchedule);
+        SequenceGroupPlanner planner = new SequenceGroupPlanner(blocks);
         Set<String> remaining = new LinkedHashSet<>(blockIds);
 
         // Per-axis "machine current state": (latest startTime, value) of any placed
@@ -66,36 +67,26 @@ public class EnhancedGreedyScheduler implements Scheduler {
         Map<String, Integer> currentAxisLatestStart = new HashMap<>();
 
         while (!remaining.isEmpty()) {
-            List<Block> schedulable = new ArrayList<>();
+            // Best ungrouped single by composite score (same logic and id tie-break
+            // as the original baseline; grouped blocks are placed via their group).
+            Block bestBlock = null;
+            double bestScore = -1;
+            int bestStartTime = -1;
+            boolean anySchedulable = false;
             for (String id : remaining) {
+                if (planner.isGrouped(id)) continue;
                 Block block = blockMap.get(id);
                 boolean allPredsScheduled = block.predecessorBlockIds().stream()
                         .filter(blockIds::contains)
                         .allMatch(pred -> engine.getScheduled().containsKey(pred));
-                if (allPredsScheduled) {
-                    schedulable.add(block);
-                }
-            }
-
-            if (schedulable.isEmpty()) {
-                return new ScheduleResult(false,
-                        "No schedulable blocks found — possible missing predecessor outside block set",
-                        0, List.of(), System.currentTimeMillis() - startMs, null, null);
-            }
-
-            Block bestBlock = null;
-            double bestScore = -1;
-            int bestStartTime = -1;
-
-            for (Block block : schedulable) {
+                if (!allPredsScheduled) continue;
+                anySchedulable = true;
                 int minStart = engine.getEarliestPredecessorEnd(block);
                 int startTime = engine.findEarliestValidStart(block, minStart);
                 if (startTime < 0) continue;
 
-                double cprScore = cprNorm.getOrDefault(block.id(), 0.0);
-                double opaScore = computeLookBackOpa(block, currentAxisValue);
-                double score = (1.0 - weight) * cprScore + weight * opaScore;
-
+                double score = (1.0 - weight) * cprNorm.getOrDefault(block.id(), 0.0)
+                        + weight * computeLookBackOpa(block, currentAxisValue);
                 if (score > bestScore
                         || (score == bestScore && (bestBlock == null || block.id().compareTo(bestBlock.id()) < 0))) {
                     bestScore = score;
@@ -104,24 +95,65 @@ public class EnhancedGreedyScheduler implements Scheduler {
                 }
             }
 
-            if (bestBlock == null) {
-                return new ScheduleResult(false,
-                        "No feasible schedule found: remaining blocks cannot fit in any available window",
-                        0, List.of(), System.currentTimeMillis() - startMs, null, null);
-            }
-
-            engine.placeBlock(bestBlock, bestStartTime);
-            // Update machine orientation state: for every axis this block declares,
-            // record the value iff this is the most recent start we've seen for the axis.
-            for (var e : bestBlock.positionAxes().entrySet()) {
-                String axis = e.getKey();
-                Integer latest = currentAxisLatestStart.get(axis);
-                if (latest == null || latest < bestStartTime) {
-                    currentAxisLatestStart.put(axis, bestStartTime);
-                    currentAxisValue.put(axis, e.getValue());
+            // Best ready sequence group, scored by its highest-scoring member.
+            String bestGroup = null;
+            double bestGroupScore = -1;
+            int bestGroupStart = -1;
+            boolean anyGroupReady = false;
+            for (String g : planner.groupIds()) {
+                List<Block> members = planner.members(g);
+                if (members.stream().noneMatch(m -> remaining.contains(m.id()))) continue;
+                if (!planner.isReady(g, pred -> engine.getScheduled().containsKey(pred))) continue;
+                anyGroupReady = true;
+                int minStart = 0;
+                for (Block m : members) {
+                    minStart = Math.max(minStart, engine.getEarliestPredecessorEnd(m));
+                }
+                int startTime = engine.findEarliestContiguousGroupStart(members, minStart);
+                if (startTime < 0) continue;
+                double score = -1;
+                for (Block m : members) {
+                    double s = (1.0 - weight) * cprNorm.getOrDefault(m.id(), 0.0)
+                            + weight * computeLookBackOpa(m, currentAxisValue);
+                    if (s > score) score = s;
+                }
+                if (bestGroup == null || score > bestGroupScore
+                        || (score == bestGroupScore && g.compareTo(bestGroup) < 0)) {
+                    bestGroupScore = score;
+                    bestGroup = g;
+                    bestGroupStart = startTime;
                 }
             }
-            remaining.remove(bestBlock.id());
+
+            if (bestBlock == null && bestGroup == null) {
+                String msg = (!anySchedulable && !anyGroupReady)
+                        ? "No schedulable blocks found — possible missing predecessor outside block set "
+                          + "or a sequence group blocked by a cyclic external dependency"
+                        : "No feasible schedule found: remaining blocks cannot fit in any available window";
+                return new ScheduleResult(false, msg, 0, List.of(),
+                        System.currentTimeMillis() - startMs, null, null);
+            }
+
+            // Choose single vs group (tie → single, reproducing the baseline when no groups exist).
+            boolean placeGroup = bestBlock == null
+                    || (bestGroup != null && bestGroupScore > bestScore);
+
+            if (!placeGroup) {
+                engine.placeBlock(bestBlock, bestStartTime);
+                updateAxisState(bestBlock, bestStartTime, currentAxisValue, currentAxisLatestStart);
+                remaining.remove(bestBlock.id());
+            } else {
+                List<Block> members = planner.members(bestGroup);
+                engine.placeGroupContiguous(members, bestGroupStart);
+                int offset = 0;
+                for (Block m : members) {
+                    updateAxisState(m, bestGroupStart + offset, currentAxisValue, currentAxisLatestStart);
+                    offset += m.durationHalfHours();
+                }
+                for (Block m : members) {
+                    remaining.remove(m.id());
+                }
+            }
         }
 
         List<ScheduledBlock> result = new ArrayList<>(engine.getScheduled().values());
@@ -137,6 +169,22 @@ public class EnhancedGreedyScheduler implements Scheduler {
      * placed block has set the axis yet). Orientation-neutral blocks (no
      * axes declared) score 1.
      */
+    /**
+     * Record {@code block}'s axis values as the machine's current orientation,
+     * per axis, iff this placement is the most recent start seen for that axis.
+     */
+    private static void updateAxisState(Block block, int startTime,
+            Map<String, String> currentAxisValue, Map<String, Integer> currentAxisLatestStart) {
+        for (var e : block.positionAxes().entrySet()) {
+            String axis = e.getKey();
+            Integer latest = currentAxisLatestStart.get(axis);
+            if (latest == null || latest < startTime) {
+                currentAxisLatestStart.put(axis, startTime);
+                currentAxisValue.put(axis, e.getValue());
+            }
+        }
+    }
+
     private static double computeLookBackOpa(Block block, Map<String, String> currentAxisValue) {
         Map<String, String> blockAxes = block.positionAxes();
         if (blockAxes.isEmpty()) return 1.0;

@@ -382,7 +382,11 @@ public class SchedulingService {
                 tool == null ? null : tool.toolName(),
                 tool == null ? null : tool.exclusive(),
                 block.predecessorBlockIds(),
-                block.colour()
+                block.colour(),
+                block.odm().sequenceGroup(),
+                block.odm().pinnedDay(),
+                block.odm().pinnedStartHour(),
+                block.odm().noParallel()
         );
     }
 

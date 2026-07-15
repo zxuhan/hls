@@ -116,6 +116,7 @@ class PrecedenceHelperTest {
                 Map.of(),
                 null,
                 predecessors,
+                null,
                 null);
     }
 

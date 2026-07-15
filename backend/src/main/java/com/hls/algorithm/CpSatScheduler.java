@@ -39,9 +39,14 @@ public class CpSatScheduler implements Scheduler {
         Map<String, IntervalVar> intervalVars = new HashMap<>();
 
         for (Block block : blocks) {
-            // Compute valid start-time domain
+            OdmConstraints odm = block.odm();
+            // Compute valid start-time domain, intersected with any ODM calendar/hour pin
+            // (constraint 8). A pin simply removes the disallowed start times from the domain.
             List<Long> validStarts = new ArrayList<>();
             for (int t = 0; t <= horizonLength - block.durationHalfHours(); t++) {
+                if (odm.hasDayPin() && TimelineHelper.dayIndex(t) != odm.pinnedDay()) continue;
+                if (odm.hasHourPin()
+                        && (t % TimelineHelper.SLOTS_PER_DAY) != (odm.pinnedStartHour() - 1) * 2) continue;
                 if (TimelineHelper.fitsInSingleDay(t, block.durationHalfHours())
                         && hasFteForBlock(t, block.durationHalfHours(), block.fteRequirement(), fteCapacity)) {
                     validStarts.add((long) t);
@@ -49,10 +54,17 @@ public class CpSatScheduler implements Scheduler {
             }
 
             if (validStarts.isEmpty()) {
+                String where = (odm.hasDayPin() || odm.hasHourPin())
+                        ? " under its ODM pin ("
+                            + (odm.hasDayPin() ? "Day " + odm.pinnedDay() : "")
+                            + (odm.hasDayPin() && odm.hasHourPin() ? ", " : "")
+                            + (odm.hasHourPin() ? "Hour_Start " + odm.pinnedStartHour() : "")
+                            + ")"
+                        : " in any single-day shift window";
                 return new ScheduleResult(false,
                         "No feasible schedule found: block " + block.id() +
                                 " (duration " + block.durationHalfHours() +
-                                " half-hours) cannot fit in any single-day shift window",
+                                " half-hours) cannot fit" + where,
                         0, List.of(), System.currentTimeMillis() - startMs, null, null);
             }
 
@@ -159,6 +171,57 @@ public class CpSatScheduler implements Scheduler {
                         }
                     }
                 }
+            }
+        }
+
+        // Constraint 7: Sequence-group contiguity. Each group's members are
+        // serialised (no-overlap) and confined to an envelope interval of length
+        // = total member duration. Disjoint + within + equal-total-length forces
+        // the members to tile the envelope with no gaps (one contiguous run).
+        // Other blocks may overlap the envelope, so no envelope-vs-others rule.
+        Map<String, List<Block>> sequenceGroups = new LinkedHashMap<>();
+        for (Block block : blocks) {
+            String group = block.odm().sequenceGroup();
+            if (group != null) {
+                sequenceGroups.computeIfAbsent(group, k -> new ArrayList<>()).add(block);
+            }
+        }
+        for (var entry : sequenceGroups.entrySet()) {
+            List<Block> members = entry.getValue();
+            if (members.size() < 2) continue;
+            int total = members.stream().mapToInt(Block::durationHalfHours).sum();
+            if (total > horizonLength) {
+                return new ScheduleResult(false,
+                        "No feasible schedule found: sequence group '" + entry.getKey() +
+                                "' has total duration " + total + " half-hours, exceeding the " +
+                                horizonLength + "-slot horizon",
+                        0, List.of(), System.currentTimeMillis() - startMs, null, null);
+            }
+            List<IntervalVar> memberIntervals = new ArrayList<>(members.size());
+            for (Block m : members) {
+                memberIntervals.add(intervalVars.get(m.id()));
+            }
+            model.addNoOverlap(memberIntervals);
+
+            IntVar envStart = model.newIntVar(0, horizonLength - total, "sgEnvelope_" + entry.getKey());
+            for (Block m : members) {
+                // envStart <= start_m  and  start_m + dur_m <= envStart + total
+                model.addGreaterOrEqual(startVars.get(m.id()), envStart);
+                model.addLessOrEqual(
+                        LinearExpr.affine(startVars.get(m.id()), 1, m.durationHalfHours()),
+                        LinearExpr.affine(envStart, 1, total));
+            }
+        }
+
+        // Constraint 9: Parallelism exclusivity. A Parallelism = No block may not
+        // overlap ANY other block. Encode as pairwise no-overlaps; for two
+        // no-parallel blocks the pair is added once (driven by the lower id).
+        for (Block n : blocks) {
+            if (!n.odm().noParallel()) continue;
+            for (Block other : blocks) {
+                if (other.id().equals(n.id())) continue;
+                if (other.odm().noParallel() && other.id().compareTo(n.id()) < 0) continue;
+                model.addNoOverlap(List.of(intervalVars.get(n.id()), intervalVars.get(other.id())));
             }
         }
 

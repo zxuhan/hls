@@ -23,6 +23,10 @@ import java.util.Set;
  *       generate scheduling constraints.</li>
  *   <li>{@code predecessorBlockIds} — block IDs that must finish before this
  *       block may start, derived from the TDM matrix.</li>
+ *   <li>{@code odm} — per-block scheduling overrides from the optional ODM
+ *       sheet (sequence group, calendar/hour pins, parallelism exclusivity).
+ *       Never {@code null}; {@link OdmConstraints#NONE} when nothing is
+ *       declared.</li>
  * </ul>
  */
 public record Block(
@@ -34,7 +38,8 @@ public record Block(
     Map<String, String> positionAxes,
     ToolRequirement requiredTool,
     List<String> predecessorBlockIds,
-    String colour
+    String colour,
+    OdmConstraints odm
 ) {
     public static final String DEFAULT_COLOUR = "#FFFF00";
 
@@ -43,5 +48,6 @@ public record Block(
         positionAxes = positionAxes == null ? Map.of() : Map.copyOf(positionAxes);
         predecessorBlockIds = predecessorBlockIds == null ? List.of() : List.copyOf(predecessorBlockIds);
         colour = (colour == null || colour.isBlank()) ? DEFAULT_COLOUR : colour;
+        odm = odm == null ? OdmConstraints.NONE : odm;
     }
 }

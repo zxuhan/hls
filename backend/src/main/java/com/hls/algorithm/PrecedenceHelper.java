@@ -167,7 +167,8 @@ public final class PrecedenceHelper {
                         b.positionAxes(),
                         b.requiredTool(),
                         effective,
-                        b.colour()
+                        b.colour(),
+                        b.odm()
                 ));
             }
         }

@@ -13,5 +13,9 @@ public record BlockDto(
     String requiredToolName,
     Boolean requiredToolExclusive,
     List<String> predecessorBlockIds,
-    String colour
+    String colour,
+    String sequenceGroup,
+    Integer pinnedDay,
+    Integer pinnedStartHour,
+    boolean noParallel
 ) {}

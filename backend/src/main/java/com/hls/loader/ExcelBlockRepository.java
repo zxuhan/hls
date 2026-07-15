@@ -1,6 +1,7 @@
 package com.hls.loader;
 
 import com.hls.model.Block;
+import com.hls.model.OdmConstraints;
 import com.hls.model.Part;
 import com.hls.model.ToolRequirement;
 import org.apache.poi.ss.usermodel.Cell;
@@ -50,6 +51,13 @@ public class ExcelBlockRepository implements BlockRepository {
     private static final String SHEET_TDM = "TDM";
     private static final String SHEET_PDM = "PDM";
     private static final String SHEET_BLOCKS_PARTS = "Blocks_Parts";
+    private static final String SHEET_ODM = "ODM";
+
+    // ── Optional ODM-sheet attribute headers (column A holds block ids) ────
+    private static final String COL_ODM_SG = "SG";
+    private static final String COL_ODM_DAY = "Day";
+    private static final String COL_ODM_HOUR_START = "Hour_Start";
+    private static final String COL_ODM_PARALLELISM = "Parallelism";
 
     // ── Required Blocks-sheet headers ──────────────────────────────────────
     private static final String COL_HL_BLOCK = "HL Block";
@@ -97,6 +105,13 @@ public class ExcelBlockRepository implements BlockRepository {
                     ? List.of()
                     : parseBlocksPartsSheet(partsSheet, rawBlocks, report);
 
+            // Optional sheet — empty map when absent. Per-block ODM overrides
+            // (sequence group, calendar/hour pins, parallelism exclusivity).
+            Sheet odmSheet = findOptionalSheet(workbook, SHEET_ODM);
+            Map<String, OdmConstraints> odmOverrides = odmSheet == null
+                    ? Map.of()
+                    : parseOdmSheet(odmSheet, knownBlockIds, report);
+
             if (report.hasViolations()) {
                 throw new LoaderValidationException(report);
             }
@@ -109,7 +124,7 @@ public class ExcelBlockRepository implements BlockRepository {
                 throw new LoaderValidationException(report);
             }
 
-            this.blockMap = assembleBlocks(rawBlocks, tdmEdges, pdmZones);
+            this.blockMap = assembleBlocks(rawBlocks, tdmEdges, pdmZones, odmOverrides);
             this.blockList = List.copyOf(blockMap.values());
             this.partList = List.copyOf(parts);
 
@@ -690,6 +705,126 @@ public class ExcelBlockRepository implements BlockRepository {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // ODM sheet (optional per-block scheduling overrides)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Parse the optional {@code ODM} sheet into per-block {@link OdmConstraints}.
+     * Column A holds block ids (from row 2); row 1 carries the attribute headers
+     * {@code SG}, {@code Day}, {@code Hour_Start}, {@code Parallelism}, located
+     * by name (case-insensitive, trimmed) and each independently optional.
+     */
+    private static Map<String, OdmConstraints> parseOdmSheet(
+            Sheet sheet, Set<String> knownBlockIds, LoaderValidationReport report) {
+
+        Map<String, OdmConstraints> result = new LinkedHashMap<>();
+        Row header = sheet.getRow(0);
+        if (header == null) {
+            // Empty optional sheet — nothing to parse.
+            return result;
+        }
+
+        // Locate attribute columns by header name, scanning from column B onward
+        // (column A is the block-id column). First match for each header wins.
+        Integer sgCol = null, dayCol = null, hourCol = null, parCol = null;
+        for (int c = 1; c < header.getLastCellNum(); c++) {
+            String name = ExcelCellReader.readString(header.getCell(c));
+            if (name == null) continue;
+            String key = name.trim().toLowerCase(Locale.ROOT);
+            if (sgCol == null && key.equals(COL_ODM_SG.toLowerCase(Locale.ROOT))) sgCol = c;
+            else if (dayCol == null && key.equals(COL_ODM_DAY.toLowerCase(Locale.ROOT))) dayCol = c;
+            else if (hourCol == null && key.equals(COL_ODM_HOUR_START.toLowerCase(Locale.ROOT))) hourCol = c;
+            else if (parCol == null && key.equals(COL_ODM_PARALLELISM.toLowerCase(Locale.ROOT))) parCol = c;
+        }
+
+        Set<String> seenIds = new HashSet<>();
+        for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null || isRowEmptyEntirely(row)) continue;
+
+            String label = ExcelCellReader.readString(row.getCell(0));
+            if (label == null) {
+                report.add(SHEET_ODM, r, 0, "ODM_MISSING_ROW_LABEL",
+                        "row has data but the block-id cell (column A) is empty");
+                continue;
+            }
+            String blockId = label.trim();
+            if (!knownBlockIds.contains(blockId)) {
+                report.add(SHEET_ODM, r, 0, "ODM_UNKNOWN_BLOCK",
+                        "block '" + blockId + "' referenced in ODM is not defined in the Blocks sheet");
+                continue;
+            }
+            if (!seenIds.add(blockId)) {
+                report.add(SHEET_ODM, r, 0, "ODM_DUPLICATE_ROW",
+                        "block '" + blockId + "' appears in more than one ODM row");
+                continue;
+            }
+
+            // SG — any non-empty string; normalized trim+lowercase for case-insensitive grouping.
+            String sequenceGroup = null;
+            if (sgCol != null) {
+                String raw = ExcelCellReader.readString(row.getCell(sgCol));
+                if (raw != null) sequenceGroup = raw.trim().toLowerCase(Locale.ROOT);
+            }
+
+            Integer pinnedDay = readOdmPositiveInt(row, dayCol, r, report,
+                    COL_ODM_DAY, "ODM_DAY_NOT_INTEGER", "ODM_DAY_NOT_POSITIVE");
+            Integer pinnedHour = readOdmPositiveInt(row, hourCol, r, report,
+                    COL_ODM_HOUR_START, "ODM_HOUR_NOT_INTEGER", "ODM_HOUR_NOT_POSITIVE");
+
+            // Parallelism — Yes / No / empty (compared after trim + lowercase).
+            boolean noParallel = false;
+            if (parCol != null) {
+                String raw = ExcelCellReader.readString(row.getCell(parCol));
+                if (raw != null) {
+                    String v = raw.trim().toLowerCase(Locale.ROOT);
+                    if (v.equals("no")) {
+                        noParallel = true;
+                    } else if (!v.equals("yes")) {
+                        report.add(SHEET_ODM, r, parCol, "ODM_PARALLELISM_INVALID",
+                                "'" + COL_ODM_PARALLELISM + "' must be 'Yes' or 'No' (or empty); got '" + raw.trim() + "'");
+                    }
+                }
+            }
+
+            result.put(blockId, new OdmConstraints(sequenceGroup, pinnedDay, pinnedHour, noParallel));
+        }
+        return result;
+    }
+
+    /**
+     * Read a positive-integer ODM cell, or {@code null} when the column is
+     * absent or the cell is empty. A present-but-non-integer value emits
+     * {@code notIntCode}; a present integer {@code < 1} emits {@code notPosCode}.
+     */
+    private static Integer readOdmPositiveInt(Row row, Integer col, int rowIdx,
+            LoaderValidationReport report, String header, String notIntCode, String notPosCode) {
+        if (col == null) return null;
+        Cell cell = row.getCell(col);
+        OptionalDouble opt = ExcelCellReader.readNumericOrEmpty(cell);
+        if (opt.isEmpty()) {
+            if (ExcelCellReader.isPresent(cell)) {
+                report.add(SHEET_ODM, rowIdx, col, notIntCode,
+                        "'" + header + "' must be a positive whole number or empty; got a non-numeric value");
+            }
+            return null;
+        }
+        double v = opt.getAsDouble();
+        if (Math.abs(v - Math.round(v)) > 1e-9) {
+            report.add(SHEET_ODM, rowIdx, col, notIntCode,
+                    "'" + header + "' must be a whole number; got " + v);
+            return null;
+        }
+        long iv = Math.round(v);
+        if (iv < 1) {
+            report.add(SHEET_ODM, rowIdx, col, notPosCode,
+                    "'" + header + "' must be ≥ 1; got " + iv);
+            return null;
+        }
+        return (int) iv;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Cycle detection (rule 18)
     // ────────────────────────────────────────────────────────────────────────
 
@@ -769,12 +904,14 @@ public class ExcelBlockRepository implements BlockRepository {
     private static Map<String, Block> assembleBlocks(
             Map<String, RawBlock> rawBlocks,
             Map<String, List<String>> predecessors,
-            Map<String, Set<String>> pdmZones) {
+            Map<String, Set<String>> pdmZones,
+            Map<String, OdmConstraints> odmOverrides) {
 
         Map<String, Block> assembled = new LinkedHashMap<>();
         for (RawBlock raw : rawBlocks.values()) {
             List<String> preds = predecessors.getOrDefault(raw.id, List.of());
             Set<String> zones = pdmZones.getOrDefault(raw.id, Set.of());
+            OdmConstraints odm = odmOverrides.getOrDefault(raw.id, OdmConstraints.NONE);
             assembled.put(raw.id, new Block(
                     raw.id,
                     raw.name,
@@ -784,7 +921,8 @@ public class ExcelBlockRepository implements BlockRepository {
                     raw.positionAxes,
                     raw.requiredTool,
                     preds,
-                    raw.colour
+                    raw.colour,
+                    odm
             ));
         }
         return assembled;

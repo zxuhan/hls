@@ -1,6 +1,7 @@
 package com.hls.algorithm;
 
 import com.hls.model.Block;
+import com.hls.model.OdmConstraints;
 import com.hls.model.ScheduledBlock;
 import com.hls.model.ShiftDay;
 import com.hls.model.ToolRequirement;
@@ -40,6 +41,14 @@ public class GreedyPlacementEngine {
     private final Map<String, List<int[]>> axisOccupancy = new HashMap<>();
     private final Map<String, List<String>> axisValueLookup = new HashMap<>();
 
+    /** Every placed block interval {@code [start, end)} — backs the
+     * Parallelism exclusivity check for {@code Parallelism = No} blocks. */
+    private final List<int[]> allOccupancy = new ArrayList<>();
+
+    /** Intervals {@code [start, end)} of placed {@code Parallelism = No}
+     * blocks. No block — exclusive or not — may overlap one of these. */
+    private final List<int[]> exclusiveOccupancy = new ArrayList<>();
+
     public GreedyPlacementEngine(List<ShiftDay> shiftSchedule) {
         this.fteCapacity = TimelineHelper.buildFteCapacityArray(shiftSchedule);
         this.horizonLength = shiftSchedule.size() * TimelineHelper.SLOTS_PER_DAY;
@@ -55,44 +64,120 @@ public class GreedyPlacementEngine {
     }
 
     public int findEarliestValidStart(Block block, int minStart) {
+        int dur = block.durationHalfHours();
+        OdmConstraints odm = block.odm();
         int t = Math.max(minStart, 0);
+        // Calendar-day pin: never start before the pinned day begins.
+        if (odm.hasDayPin()) {
+            t = Math.max(t, (odm.pinnedDay() - 1) * TimelineHelper.SLOTS_PER_DAY);
+        }
 
-        while (t + block.durationHalfHours() <= horizonLength) {
-            // Day containment check
-            if (!TimelineHelper.fitsInSingleDay(t, block.durationHalfHours())) {
+        while (t + dur <= horizonLength) {
+            // Calendar-day pin: once we are past the pinned day, give up.
+            if (odm.hasDayPin() && TimelineHelper.dayIndex(t) > odm.pinnedDay()) {
+                return -1;
+            }
+            // Hour pin: skip ahead to the next slot whose intra-day offset matches.
+            if (odm.hasHourPin()) {
+                int target = (odm.pinnedStartHour() - 1) * 2;
+                int off = t % TimelineHelper.SLOTS_PER_DAY;
+                if (off != target) {
+                    t += (off < target) ? (target - off)
+                                        : (TimelineHelper.SLOTS_PER_DAY - off + target);
+                    continue;
+                }
+            }
+            // Day containment: jump to the next day if the block would straddle midnight.
+            if (!TimelineHelper.fitsInSingleDay(t, dur)) {
                 t = TimelineHelper.nextDayStart(t);
                 continue;
             }
-
-            // FTE capacity check
-            if (!TimelineHelper.hasSufficientFte(t, block.durationHalfHours(),
-                    block.fteRequirement(), fteCapacity, fteUsed)) {
-                t++;
-                continue;
+            // All remaining hard constraints (FTE, zones, tools, position, parallelism).
+            if (canPlaceAt(block, t)) {
+                return t;
             }
-
-            // Spatial exclusivity check (set intersection over occupied zones)
-            if (hasZoneConflict(block, t, t + block.durationHalfHours())) {
-                t++;
-                continue;
-            }
-
-            // Tool exclusivity check
-            if (hasToolConflict(block, t, t + block.durationHalfHours())) {
-                t++;
-                continue;
-            }
-
-            // Operational position check (per-axis thesis rule)
-            if (hasPositionConflict(block, t, t + block.durationHalfHours())) {
-                t++;
-                continue;
-            }
-
-            return t;
+            t++;
         }
 
         return -1; // No valid placement found
+    }
+
+    /**
+     * Whether {@code block} can occupy {@code [t, t+duration)} against every
+     * hard constraint the engine tracks: calendar/hour pins, day containment,
+     * FTE capacity, spatial zones, tool exclusivity, operational position, and
+     * parallelism exclusivity. Used both for the single-block scan above and
+     * for laying out a contiguous sequence-group chain.
+     */
+    private boolean canPlaceAt(Block block, int t) {
+        int dur = block.durationHalfHours();
+        int end = t + dur;
+        if (t < 0 || end > horizonLength) return false;
+        if (!isStartAdmissibleForPin(block, t)) return false;
+        if (!TimelineHelper.fitsInSingleDay(t, dur)) return false;
+        if (!TimelineHelper.hasSufficientFte(t, dur, block.fteRequirement(), fteCapacity, fteUsed)) return false;
+        if (hasZoneConflict(block, t, end)) return false;
+        if (hasToolConflict(block, t, end)) return false;
+        if (hasPositionConflict(block, t, end)) return false;
+        if (hasParallelConflict(block, t, end)) return false;
+        return true;
+    }
+
+    private static boolean isStartAdmissibleForPin(Block block, int t) {
+        OdmConstraints odm = block.odm();
+        if (odm.hasDayPin() && TimelineHelper.dayIndex(t) != odm.pinnedDay()) {
+            return false;
+        }
+        if (odm.hasHourPin()
+                && (t % TimelineHelper.SLOTS_PER_DAY) != (odm.pinnedStartHour() - 1) * 2) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Earliest absolute start at which the whole sequence-group chain fits when
+     * its members are laid back-to-back in the given order, or {@code -1} if no
+     * such start exists. The chain occupies a single contiguous interval of
+     * length equal to the sum of member durations; other blocks may run in
+     * parallel during it.
+     */
+    public int findEarliestContiguousGroupStart(List<Block> orderedMembers, int minStart) {
+        int total = 0;
+        for (Block m : orderedMembers) {
+            total += m.durationHalfHours();
+        }
+        int t = Math.max(minStart, 0);
+        while (t + total <= horizonLength) {
+            if (canPlaceGroupAt(orderedMembers, t)) {
+                return t;
+            }
+            t++;
+        }
+        return -1;
+    }
+
+    private boolean canPlaceGroupAt(List<Block> orderedMembers, int startT) {
+        // Members occupy disjoint, back-to-back sub-intervals, so checking each
+        // against the current engine state (which excludes its siblings) is
+        // sufficient — siblings never overlap one another.
+        int offset = 0;
+        for (Block m : orderedMembers) {
+            if (!canPlaceAt(m, startT + offset)) {
+                return false;
+            }
+            offset += m.durationHalfHours();
+        }
+        return true;
+    }
+
+    /** Place every member of a sequence-group chain back-to-back from {@code startT}. */
+    public void placeGroupContiguous(List<Block> orderedMembers, int startT) {
+        int offset = 0;
+        for (Block m : orderedMembers) {
+            placeBlock(m, startT + offset);
+            offset += m.durationHalfHours();
+        }
     }
 
     public void placeBlock(Block block, int startTime) {
@@ -124,6 +209,12 @@ public class GreedyPlacementEngine {
             int valueId = internAxisValue(axis, value);
             axisOccupancy.computeIfAbsent(axis, k -> new ArrayList<>())
                     .add(new int[]{startTime, endTime, valueId});
+        }
+
+        // Update parallelism bookkeeping (constraint 9).
+        allOccupancy.add(new int[]{startTime, endTime});
+        if (block.odm().noParallel()) {
+            exclusiveOccupancy.add(new int[]{startTime, endTime});
         }
 
         scheduled.put(block.id(), new ScheduledBlock(block.id(), startTime, endTime, dayIndex));
@@ -187,6 +278,18 @@ public class GreedyPlacementEngine {
         ToolRequirement tool = block.requiredTool();
         if (tool == null || !tool.exclusive()) return false;
         return hasOverlap(toolOccupancy.get(tool.toolName()), start, end);
+    }
+
+    /**
+     * Parallelism exclusivity (constraint 9). A {@code Parallelism = No} block
+     * may not overlap anything already placed; conversely, no block may overlap
+     * an already-placed {@code Parallelism = No} block.
+     */
+    private boolean hasParallelConflict(Block block, int start, int end) {
+        if (block.odm().noParallel() && hasOverlap(allOccupancy, start, end)) {
+            return true;
+        }
+        return hasOverlap(exclusiveOccupancy, start, end);
     }
 
     private boolean hasPositionConflict(Block block, int start, int end) {

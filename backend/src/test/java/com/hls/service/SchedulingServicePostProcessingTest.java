@@ -253,7 +253,7 @@ class SchedulingServicePostProcessingTest {
     // ─── helpers ─────────────────────────────────────────────────────────
 
     private static Block simpleBlock(String id, String name, int durationHalfHours, int fte) {
-        return new Block(id, name, durationHalfHours, fte, null, null, null, null, null);
+        return new Block(id, name, durationHalfHours, fte, null, null, null, null, null, null);
     }
 
     private static ScheduledBlockDto findById(List<ScheduledBlockDto> dtos, String id) {
