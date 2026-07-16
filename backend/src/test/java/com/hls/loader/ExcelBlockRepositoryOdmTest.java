@@ -1,6 +1,7 @@
 package com.hls.loader;
 
 import com.hls.model.Block;
+import com.hls.model.OdmConstraints;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -49,6 +50,52 @@ class ExcelBlockRepositoryOdmTest {
         assertThat(b2.odm().pinnedDay()).isNull();
         assertThat(b2.odm().pinnedStartHour()).isNull();
         assertThat(b2.odm().noParallel()).isFalse();
+    }
+
+    /**
+     * The sheet is optional. A workbook without it must load exactly as it did
+     * before ODM existed: every block carries {@link OdmConstraints#NONE} and
+     * only the six core constraints apply. No violation, no warning.
+     */
+    @Test
+    void omittedOdmSheetLoadsCleanly(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("no_odm.xlsx");
+        try (Workbook wb = new XSSFWorkbook()) {
+            writeBlocks(wb);
+            writeTdm(wb);
+            writePdm(wb);
+            write(wb, file); // no ODM sheet at all
+        }
+
+        ExcelBlockRepository repo = new ExcelBlockRepository(file.toString());
+        assertThat(repo.getAllBlocks()).isNotEmpty();
+        assertThat(repo.getAllBlocks()).allSatisfy(b ->
+                assertThat(b.odm()).isEqualTo(OdmConstraints.NONE));
+    }
+
+    /**
+     * A block with no row in the sheet, and a block whose row is present but
+     * entirely blank, must both come out unconstrained rather than erroring —
+     * a sparse sheet listing every block with only a few filled in is the
+     * normal case.
+     */
+    @Test
+    void absentAndBlankOdmRowsCarryNoOverrides(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("odm_sparse.xlsx");
+        try (Workbook wb = new XSSFWorkbook()) {
+            writeBlocks(wb);
+            writeTdm(wb);
+            writePdm(wb);
+            Sheet odm = wb.createSheet("ODM");
+            header(odm, "ODM", "SG", "Day", "Hours_Start", "Parallelism");
+            row(odm, 1, "B1", "", "", "", ""); // present but every attribute blank
+            // B2 has no row at all
+            write(wb, file);
+        }
+
+        ExcelBlockRepository repo = new ExcelBlockRepository(file.toString());
+        assertThat(repo.getBlockById("B1").odm()).isEqualTo(OdmConstraints.NONE);
+        assertThat(repo.getBlockById("B2").odm()).isEqualTo(OdmConstraints.NONE);
     }
 
     /**
